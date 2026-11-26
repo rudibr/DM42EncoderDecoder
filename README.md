@@ -17,7 +17,7 @@ The demo types a short program and encodes it, opens `DPLOT.raw`, pastes hex and
 
 | | Example |
 |---|---|
-| Comments start with `'` outside a string | `STO 01   ' keep it` |
+| Comments start with `'` or `;` outside a string | `STO 01   ' keep it`, `RTN ; done` |
 | Line numbers and the header are optional | `0001`, `01▸`, `01◆` |
 | Strings and append | `"TEXT"`, `├"MORE"` or `\|-"MORE"` |
 | Registers, stack, indirect, names | `STO 07`, `RCL ST X`, `STO IND 03`, `RCL "NAME"`, `XEQ IND "P"` |

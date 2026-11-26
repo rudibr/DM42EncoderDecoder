@@ -41,5 +41,9 @@ for (const [src, hx] of cases) {
 const c = D.encode(`LBL "T" ' entry\n"it's" ' apostrophe inside a string\nFOO 1\nSTO 123\nEND`);
 check(c.errors.length === 2 && c.progs[0].size === 10, 'comments ignored, bad lines reported');
 
+const sc = D.encode(`LBL "S";entry\n"A;B" ; semicolon inside a string is text\nSTO 01 ; store\n; whole-line comment\n"it's; ok"' both\nEND`);
+check(!sc.errors.length && D.hexs(sc.bytes) === 'C0 00 F2 00 53 F3 41 3B 42 31 F8 69 74 27 73 3B 20 6F 6B C0 00 0D', '; comments, ; and \' inside strings kept as text');
+check(D.format(sc).includes('0003 STO 01           ; store') && D.format(sc).includes('; whole-line comment'), '; comments preserved when renumbering');
+
 console.log(fails ? `\n${fails} FAILED` : '\nAll tests passed');
 process.exit(fails ? 1 : 0);
