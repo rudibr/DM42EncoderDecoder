@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DM42 Program Codec</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* VOICE: a precise bench tool, calm and dark.
+   IDEA: the DM42 itself — graphite case, the two listing panes read like its screen in PRGM mode.
+   PICTURE: the two editors are the picture; line numbers and hex sit side by side.
+   COLOUR: graphite case, LCD-paper text, the shift-key orange as the one accent.
+   TYPE: Inter Tight for labels, JetBrains Mono for code. LAYOUT: toolbar, two panes, status strip, reference. */
+:root{color-scheme:dark;--bg:#16181a;--case:#1f2225;--pane:#121416;--line:#2e3236;--ink:#e6e3da;--dim:#9a9d9f;--acc:#f0922b;--ok:#7fc79a;--err:#ff7a6b}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "Inter Tight",system-ui,sans-serif;overflow-x:clip}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;padding:14px max(3vw,14px);background:var(--case);border-bottom:1px solid var(--line)}
+h1{font-size:20px;font-weight:600;margin:0;letter-spacing:.2px}
+h1 b{color:var(--acc);font-weight:600}
+.sub{color:var(--dim);font-size:13px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;padding:12px max(3vw,14px);border-bottom:1px solid var(--line);align-items:center}
+button,.btn{font:500 14px "Inter Tight",sans-serif;color:var(--ink);background:#2a2e32;border:1px solid #3a3f44;border-radius:7px;padding:0 14px;min-height:40px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+button:hover,.btn:hover{background:#33383d}
+button:focus-visible,.btn:focus-within,textarea:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+button.pri{background:var(--acc);color:#1a1206;border-color:var(--acc);font-weight:600}
+button.pri:hover{background:#ffa443}
+.sep{width:1px;height:28px;background:var(--line);margin:0 4px}
+label.chk{display:flex;gap:6px;align-items:center;color:var(--dim);font-size:13px;cursor:pointer}
+.btn input{display:none}
+main{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:14px;padding:14px max(3vw,14px)}
+.pane{display:flex;flex-direction:column;background:var(--case);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.ph{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--dim)}
+.ph strong{color:var(--ink);font-weight:600;font-size:14px}
+.ph button{min-height:32px;padding:0 10px;font-size:13px}
+textarea{width:100%;height:min(66vh,640px);min-height:320px;resize:vertical;border:0;margin:0;padding:12px 14px;background:var(--pane);color:var(--ink);font:14px/1.55 "JetBrains Mono",ui-monospace,monospace;tab-size:4;white-space:pre;overflow:auto}
+textarea::placeholder{color:#5d6266}
+textarea.drag{outline:2px dashed var(--acc);outline-offset:-6px}
+#status{margin:0 max(3vw,14px);padding:10px 14px;border-radius:8px;background:var(--case);border:1px solid var(--line);font:13px/1.5 "JetBrains Mono",monospace;min-height:42px}
+#status .ok{color:var(--ok)}#status .err{color:var(--err)}
+#status a{color:var(--err);cursor:pointer;text-decoration:underline dotted}
+.ref{padding:18px max(3vw,14px) 34px;color:var(--dim);font-size:14px}
+.ref h2{color:var(--ink);font-size:16px;margin:0 0 8px}
+.ref .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:6px 24px}
+.ref code{font-family:"JetBrains Mono",monospace;color:var(--ink);background:#25292c;padding:1px 5px;border-radius:4px;font-size:13px}
+@media(max-width:820px){main{grid-template-columns:minmax(0,1fr)}textarea{height:46vh}.sep{display:none}}
+</style>
+</head>
+<body>
+<header>
+  <h1>DM42 <b>⇄</b> RAW</h1>
+  <span class="sub">Encode and decode HP-42S / Free42 / DM42 programs. Everything runs in your browser.</span>
+</header>
+<div class="bar">
+  <label class="btn" title="Load a .raw file or a text listing">Open file…<input type="file" id="file" accept=".raw,.txt,.42s,.free42,.hp42s,.lst,text/plain,application/octet-stream"></label>
+  <span class="sep"></span>
+  <button class="pri" id="enc" title="Ctrl+Enter">Encode →</button>
+  <button class="pri" id="dec">← Decode</button>
+  <label class="chk"><input type="checkbox" id="renum" checked> Renumber listing on encode</label>
+  <span class="sep"></span>
+  <button id="saveRaw">Save .raw</button>
+  <button id="saveTxt">Save .txt</button>
+  <button id="sample">Load example</button>
+  <button id="clear">Clear</button>
+</div>
+<main>
+  <section class="pane">
+    <div class="ph"><strong>Program listing</strong><span id="lcount"></span><button data-copy="src">Copy</button></div>
+    <textarea id="src" spellcheck="false" placeholder="0000 { 0-Byte Prgm }&#10;0001 LBL &quot;HELLO&quot;   ' comments start with '&#10;0002 &quot;Hello world&quot;&#10;0003 AVIEW&#10;0004 END&#10;&#10;Drop a .raw or .txt file here"></textarea>
+  </section>
+  <section class="pane">
+    <div class="ph"><strong>RAW bytes (hex)</strong><span id="hcount"></span><button data-copy="hex">Copy</button></div>
+    <textarea id="hex" spellcheck="false" placeholder="Hex appears here after Encode. You can also paste hex and press Decode."></textarea>
+  </section>
+</main>
+<div id="status" role="status" aria-live="polite"><span class="ok">Ready.</span></div>
+<section class="ref">
+  <h2>Listing syntax</h2>
+  <div class="grid">
+    <div>Line numbers (<code>0001</code>, <code>01▸</code>, <code>01◆</code>) and the <code>{ n-Byte Prgm }</code> header are optional; they are rebuilt on encode.</div>
+    <div>Comments start with <code>'</code> outside a string: <code>STO 01 ' keep it</code>. An apostrophe inside <code>"it's"</code> is text.</div>
+    <div>Strings: <code>"TEXT"</code>, append with <code>├"MORE"</code> or <code>|-"MORE"</code>. Up to 15 characters.</div>
+    <div>Arguments: <code>STO 07</code>, <code>RCL ST X</code>, <code>STO IND 03</code>, <code>VIEW IND ST Y</code>, <code>RCL "NAME"</code>, <code>XEQ IND "P"</code>.</div>
+    <div>Labels: <code>LBL "MAIN"</code>, <code>LBL 05</code>, <code>LBL A</code>/<code>a</code>; <code>KEY 1 XEQ 01</code>, <code>ASSIGN "X" TO 03</code>.</div>
+    <div>ASCII is accepted: <code>/ * ^ -&gt; &lt;= &gt;= != RDN CHS SIGMA+</code>. Free42 extensions such as <code>FUNC</code>, <code>LSTO</code>, <code>X=?</code>, <code>XSTR</code> are supported.</div>
+    <div>Unknown bytes decode as <code>XROM mm,ff</code> or <code>HEX F2 …</code>, and those lines encode back to the same bytes.</div>
+    <div>Several programs: each one ends with <code>END</code>. A missing final <code>END</code> is added for you.</div>
+  </div>
+</section>
+<script>
+// DM42 / Free42 / HP-42S program codec. Byte tables follow Free42's core_tables.cc / export_hp42s.
+const DM42 = (() => {
+  // name scode code1 code2 argtype   (hex). argtypes: N none, V var, NM named, RV rvar, M mat, P prgm, N9 N11 N99, F func
+  const T = `CLX 00 00 77 N|ENTER 00 00 83 N|X<>Y 00 00 71 N|R↓ 00 00 75 N|+/- 00 00 54 N|÷ 00 00 43 N|× 00 00 42 N|- 00 00 41 N|+ 00 00 40 N
+LASTX 00 00 76 N|SIN 00 00 59 N|COS 00 00 5a N|TAN 00 00 5b N|ASIN 00 00 5c N|ACOS 00 00 5d N|ATAN 00 00 5e N|LOG 00 00 56 N|10↑X 00 00 57 N
+LN 00 00 50 N|E↑X 00 00 55 N|SQRT 00 00 52 N|X↑2 00 00 51 N|1/X 00 00 60 N|Y↑X 00 00 53 N|% 00 00 4c N|PI 00 00 72 N|COMPLEX 00 a0 72 N
+STO 81 00 91 V|STO÷ 85 00 95 V|STO× 84 00 94 V|STO- 83 00 93 V|STO+ 82 00 92 V|RCL 91 00 90 V|RCL÷ 95 f2 d4 V|RCL× 94 f2 d3 V|RCL- 93 f2 d2 V|RCL+ 92 f2 d1 V
+FIX d4 00 9c N11|SCI d5 00 9d N11|ENG d6 00 9e N11|ALL 00 a2 5d N|ASTO b2 00 9a V|ARCL b3 00 9b V|CLA 00 00 87 N|DEG 00 00 80 N|RAD 00 00 81 N|GRAD 00 00 82 N
+RECT 00 a2 5a N|POLAR 00 a2 59 N|CPXRES 00 a2 6a N|REALRES 00 a2 6b N|KEYASN 00 a2 63 N|LCLBL 00 a2 64 N|RDX. 00 a2 5b N|RDX, 00 a2 5c N|CLΣ 00 00 70 N
+CLP f0 00 00 P|CLV b0 f2 d8 NM|CLST 00 00 73 N|CLRG 00 00 8a N|CLKEYS 00 a2 62 N|CLLCD 00 a7 63 N|CLMENU 00 a2 6d N|→DEG 00 00 6b N|→RAD 00 00 6a N
+→HR 00 00 6d N|→HMS 00 00 6c N|→REC 00 00 4e N|→POL 00 00 4f N|IP 00 00 68 N|FP 00 00 69 N|RND 00 00 6e N|ABS 00 00 61 N|SIGN 00 00 7a N|MOD 00 00 4b N
+SF a0 00 a8 N99|CF a1 00 a9 N99|FS? a4 00 ac N99|FC? a5 00 ad N99|FS?C a2 00 aa N99|FC?C a3 00 ab N99|COMB 00 a0 6f N|PERM 00 a0 70 N|N! 00 00 62 N
+GAMMA 00 a0 74 N|RAN 00 a0 71 N|SEED 00 a0 73 N|RTN 00 00 85 N|INPUT c5 f2 d0 V|VIEW 80 00 98 V|AVIEW 00 00 7e N|PROMPT 00 00 8e N|PSE 00 00 89 N
+ISG 96 00 96 V|DSE 97 00 97 V|AIP 00 a6 31 N|XTOA 00 a6 6f N|AGRAPH 00 a7 64 N|PIXEL 00 a7 65 N|BEEP 00 00 86 N|TONE d7 00 9f N9|MVAR 90 00 00 RV
+VARMENU c1 f2 f8 P|GETKEY 00 a2 6e N|MENU 00 a2 5e N|X=0? 00 00 67 N|X≠0? 00 00 63 N|X<0? 00 00 66 N|X>0? 00 00 64 N|X≤0? 00 00 7b N|X≥0? 00 a2 5f N
+X=Y? 00 00 78 N|X≠Y? 00 00 79 N|X<Y? 00 00 44 N|X>Y? 00 00 45 N|X≤Y? 00 00 46 N|X≥Y? 00 a2 60 N|PRΣ 00 a7 52 N|PRV b1 f2 d9 NM|PRSTK 00 a7 53 N
+PRA 00 a7 48 N|PRX 00 a7 54 N|PRUSR 00 a7 61 N|ADV 00 00 8f N|PRLCD 00 a7 62 N|DELAY 00 a7 60 N|PRON 00 a7 5e N|PROFF 00 a7 5f N|MAN 00 a7 5b N
+NORM 00 a7 5c N|TRACE 00 a7 5d N|Σ+ 00 00 47 N|Σ- 00 00 48 N|STOP 00 00 84 N|NEWMAT 00 a6 da N|R↑ 00 00 74 N|REAL? 00 a2 65 N|CPX? 00 a2 67 N
+STR? 00 a2 68 N|MAT? 00 a2 66 N|DIM? 00 a6 e7 N|ON 00 a2 70 N|OFF 00 00 8d N|ΣREG d3 00 99 N99|ΣREG? 00 a6 78 N|CLD 00 00 7f N|ACOSH 00 a0 66 N
+ALENG 00 a6 41 N|ALLΣ 00 a0 ae N|AND 00 a5 88 N|AOFF 00 00 8b N|AON 00 00 8c N|AROT 00 a6 46 N|ASHF 00 00 88 N|ASINH 00 a0 64 N|ATANH 00 a0 65 N
+ATOX 00 a6 47 N|BASE+ 00 a0 e6 N|BASE- 00 a0 e7 N|BASE× 00 a0 e8 N|BASE÷ 00 a0 e9 N|BASE+/- 00 a0 ea N|BEST 00 a0 9f N|BINM 00 a0 e5 N|BIT? 00 a5 8c N
+CORR 00 a0 a7 N|COSH 00 a0 62 N|CROSS 00 a6 ca N|CUSTOM 00 a2 6f N|DECM 00 a0 e3 N|DELR 00 a0 ab N|DET 00 a6 cc N|DIM c4 f2 ec M|DOT 00 a6 cb N
+EDIT 00 a6 e1 N|EDITN c6 f2 ef M|EXITALL 00 a2 6c N|EXPF 00 a0 a0 N|E↑X-1 00 00 58 N|FCSTX 00 a0 a8 N|FCSTY 00 a0 a9 N|FNRM 00 a6 cf N|GETM 00 a6 e8 N
+GROW 00 a6 e3 N|HEXM 00 a0 e2 N|HMS+ 00 00 49 N|HMS- 00 00 4a N|I+ 00 a6 d2 N|I- 00 a6 d3 N|INDEX 87 f2 da M|INSR 00 a0 aa N|INTEG b6 f2 ea RV
+INVRT 00 a6 ce N|J+ 00 a6 d4 N|J- 00 a6 d5 N|LINF 00 a0 a1 N|LINΣ 00 a0 ad N|LN1+X 00 00 65 N|LOGF 00 a0 a2 N|MEAN 00 00 7c N|NOT 00 a5 87 N
+OCTM 00 a0 e4 N|OLD 00 a6 db N|OR 00 a5 89 N|PGMSLV b5 f2 e9 P|PGMINT b4 f2 e8 P|POSA 00 a6 5c N|PUTM 00 a6 e9 N|PWRF 00 a0 a3 N|RCLEL 00 a6 d7 N
+RCLIJ 00 a6 d9 N|RNRM 00 a6 ed N|ROTXY 00 a5 8b N|RSUM 00 a6 d0 N|R<>R 00 a6 d1 N|SDEV 00 00 7d N|SINH 00 a0 61 N|SLOPE 00 a0 a4 N|SOLVE b7 f2 eb RV
+STOEL 00 a6 d6 N|STOIJ 00 a6 d8 N|SUM 00 a0 a5 N|TANH 00 a0 63 N|TRANS 00 a6 c9 N|UVEC 00 a6 cd N|WMEAN 00 a0 ac N|WRAP 00 a6 e2 N|X<> 86 00 ce V
+XOR 00 a5 8a N|YINT 00 a0 a6 N|→DEC 00 00 5f N|→OCT 00 00 6f N|← 00 a6 dc N|↑ 00 a6 de N|↓ 00 a6 df N|→ 00 a6 dd N|%CH 00 00 4d N
+[MAX] 00 a6 eb N|[MIN] 00 a6 ea N|[FIND] 00 a6 ec N|ACCEL 00 a7 cf N|LOCAT 00 a7 d0 N|HEADING 00 a7 d1 N|ADATE 00 a6 81 N|ATIME 00 a6 84 N
+ATIME24 00 a6 85 N|CLK12 00 a6 86 N|CLK24 00 a6 87 N|DATE 00 a6 8c N|DATE+ 00 a6 8d N|DDAYS 00 a6 8e N|DMY 00 a6 8f N|DOW 00 a6 90 N|MDY 00 a6 91 N
+TIME 00 a6 9c N|FPTEST 00 a7 d2 N|LSTO c7 f2 ed NM|YMD 00 a7 d5 N|GETKEY1 00 a7 d9 N|GETKEYA 00 a6 ee N|LASTO f5 f2 c8 NM|LCLV 71 f2 64 NM
+TRY 00 a7 78 N|TRYX 00 a7 79 N|CATCH? 00 a7 7a N|PRTRACE 00 a7 7b N|SL 00 a7 dc N|SR 00 a7 dd N|ASR 00 a7 2c N|SLN 00 a7 73 N|SRN 00 a7 74 N
+ASRN 00 a7 75 N|LJ 00 a7 2b N|RJ 00 a7 72 N|RL 00 a7 e0 N|RR 00 a7 fa N|RLC 00 a7 fb N|RRC 00 a7 2a N|RLN 00 a7 2d N|RRN 00 a7 2e N|RLCN 00 a7 2f N
+RRCN 00 a7 30 N|SB 00 a7 31 N|CB 00 a7 32 N|B? 00 a7 33 N|#B 00 a7 34 N|MASKL 00 a7 35 N|MASKR 00 a7 36 N|SC 00 a7 37 N|CC 00 a7 38 N|C? 00 a7 39 N
+N→BS 00 a7 3f N|N→BD 00 a7 67 N|N→BQ 00 a7 68 N|N→DS 00 a7 69 N|N→DD 00 a7 6a N|N→DQ 00 a7 6b N|N→PS 00 a6 a6 N|N→PD 00 a6 a7 N|N→PQ 00 a6 a8 N
+BS→N 00 a7 6c N|BD→N 00 a7 6d N|BQ→N 00 a7 6e N|DS→N 00 a7 6f N|DD→N 00 a7 70 N|DQ→N 00 a7 71 N|PS→N 00 a6 a9 N|PD→N 00 a6 aa N|PQ→N 00 a6 ab N
+WSIZE 00 a7 d3 N|WSIZE? 00 a7 d4 N|BSIGNED 00 a7 d6 N|BWRAP 00 a7 d7 N|BRESET 00 a7 d8 N|DECINT 00 a7 3a N|BINSEP 00 a7 3b N|OCTSEP 00 a7 3c N
+DECSEP 00 a7 3d N|HEXSEP 00 a7 3e N|ANUM 00 a6 42 N|X<>F 00 a6 6e N|RCLFLAG 00 a6 60 N|STOFLAG 00 a6 6d N|FUNC 00 f2 e0 F|ERRMSG 00 a7 f6 N
+ERRNO 00 a7 f7 N|RTNYES 00 a7 de N|RTNNO 00 a7 df N|RTNERR dc f2 a0 N99|STRACE 00 a7 e1 N|4STK 00 a7 e2 N|L4STK 00 a7 e3 N|NSTK 00 a7 e4 N
+LNSTK 00 a7 e5 N|DEPTH 00 a7 e6 N|DROP 00 a2 71 N|DROPN f1 f2 a1 N9|DUP 00 a7 e7 N|DUPN f2 f2 a2 N9|PICK f3 f2 a3 N9|UNPICK f4 f2 a4 N9
+R↓N f6 f2 a5 N9|R↑N f7 f2 a6 N9|NOP 00 00 f0 N|FMA 00 a7 da N|PGMMENU 00 a7 e8 N|PGMVAR 40 f2 30 P|VARMNU1 42 f2 31 P|MENU1 00 a7 77 N
+PARAMS 00 a7 7c N|RCOMPLX 00 a7 f8 N|PCOMPLX 00 a7 f9 N|RE 00 a7 7e N|IM 00 a7 7f N|CONJ 00 a6 a4 N|ARG 00 a6 a5 N|SKIP 00 a2 74 N
+CPXMAT? 00 a2 75 N|TYPE? 00 a2 76 N|A...F 00 a7 1b N|PRREG 00 a7 50 N|CSLD? 00 a7 db N|C.LN1+X 00 a6 fe N|C.E↑X-1 00 a6 ff N
+GETMI 72 f2 65 V|PUTMI 73 f2 66 V|GETLI 74 f2 67 V|PUTLI 75 f2 68 V|IDENT 00 a7 f5 N|XASTO 01 f2 11 V|LXASTO 02 f2 12 NM|XVIEW 00 a7 19 N
+APPEND 00 a7 e9 N|EXTEND 00 a7 ea N|SUBSTR 00 a7 eb N|LENGTH 00 a7 ec N|HEAD 03 f2 13 V|REV 00 a7 ed N|SORT 00 a7 7d N|POS 00 a7 ee N|S→N 00 a7 ef N
+N→S 00 a7 f0 N|NN→S 00 a7 1d N|IP→S 00 a7 76 N|C→N 00 a7 f1 N|N→C 00 a7 f2 N|LIST? 00 a7 f3 N|NEWLIST 00 a7 f4 N|→LIST 00 a6 fc N|LIST→ 00 a6 fd N
+X=? 04 f2 14 V|X≠? 05 f2 15 V|X<? 06 f2 16 V|X>? 07 f2 17 V|X≤? 20 f2 18 V|X≥? 21 f2 19 V|0=? 22 f2 1a V|0≠? 23 f2 1b V|0<? 24 f2 1c V|0>? 25 f2 1d V
+0≤? 26 f2 1e V|0≥? 27 f2 1f V|ΣN 00 a7 ba N|ΣX 00 a7 bb N|ΣX2 00 a7 bc N|ΣY 00 a7 bd N|ΣY2 00 a7 be N|ΣXY 00 a7 bf N|ΣLNX 00 a7 c1 N|ΣLNX2 00 a7 c2 N
+ΣLNY 00 a7 c3 N|ΣLNY2 00 a7 c4 N|ΣLNXLNY 00 a7 c5 N|ΣXLNY 00 a7 c6 N|ΣYLNX 00 a7 c7 N|WIDTH 00 a2 72 N|HEIGHT 00 a2 73 N`;
+
+  const CMDS = {}, BYNAME = {}, ONE = {}, POST = {}, XROM = {}, F2 = {}, SC = {};
+  for (const e of T.split(/[|\n]/)) {
+    const [name, sc, c1, c2, at] = e.trim().split(' ');
+    const c = { name, sc: parseInt(sc, 16), c1: parseInt(c1, 16), c2: parseInt(c2, 16), at };
+    CMDS[name] = c;
+    if (c.c1 === 0 && c.c2) (at === 'N' ? ONE : POST)[c.c2] = c;
+    else if (c.c1 >= 0xa0 && c.c1 <= 0xa7) XROM[(c.c1 << 8) | c.c2] = c;
+    else if (c.c1 === 0xf2) F2[c.c2] = c;
+    if (c.sc) {
+      const numOnly = at.startsWith('N9') || at === 'N11' || at === 'N99';
+      if (!numOnly) SC[c.sc] = { c, ind: false };
+      SC[c.sc + 8] = { c, ind: true };
+    }
+  }
+  // special commands
+  for (const n of ['LBL', 'GTO', 'XEQ', 'END', 'SIZE', 'KEYX', 'KEYG', 'ASSIGN', 'XSTR', 'XROM']) CMDS[n] = { name: n, special: true };
+  SC[0xae] = { c: { name: 'GTO' }, ind: true }; SC[0xaf] = { c: { name: 'XEQ' }, ind: true };
+
+  // ---- HP-42S character set <-> Unicode ----
+  const LOW = '÷×√∫░Σ▶π¿≤␊≥≠↵↓→←µ£°ÅÑÄ∡ᴇÆ…␛ÖÜ▒•';
+  const toUni = b => b < 32 ? LOW[b] : b === 94 ? '↑' : b === 127 ? '├' : b < 127 ? String.fromCharCode(b) : '\\x' + b.toString(16).toUpperCase().padStart(2, '0');
+  const bytesToStr = a => Array.from(a, toUni).join('');
+  function strToBytes(s) {
+    const out = [];
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+      if (ch === '\\' && s[i + 1] === 'x' && /^[0-9a-fA-F]{2}$/.test(s.substr(i + 2, 2))) { out.push(parseInt(s.substr(i + 2, 2), 16)); i += 3; continue; }
+      let k = LOW.indexOf(ch);
+      if (ch === 'μ') k = 17; if (ch === '⊢') { out.push(127); continue; }
+      if (k >= 0) out.push(k);
+      else if (ch === '↑') out.push(94);
+      else if (ch === '├') out.push(127);
+      else { const c = ch.charCodeAt(0); if (c > 126) throw `Character "${ch}" not in the HP-42S character set`; out.push(c); }
+    }
+    return out;
+  }
+
+  // ---- name normalisation for lookup ----
+  const norm = s => s.toUpperCase().replace(/SIGMA/g, 'Σ').replace(/÷/g, '/').replace(/×/g, '*').replace(/↑/g, '^').replace(/↓/g, 'V')
+    .replace(/→/g, '->').replace(/←/g, '<-').replace(/≤/g, '<=').replace(/≥/g, '>=').replace(/≠|!=/g, '#').replace(/π/g, 'PI').replace(/►|▸|◆/g, '');
+  const LOOK = {};
+  for (const n in CMDS) LOOK[norm(n)] = CMDS[n];
+  const ALIAS = { 'RDN': 'R↓', 'RUP': 'R↑', 'CHS': '+/-', 'SWAP': 'X<>Y', '√X': 'SQRT', '√': 'SQRT', 'X': '×', 'STOX': 'STO×', 'RCLX': 'RCL×', 'BASEX': 'BASE×', 'ENTER^': 'ENTER', 'LSTX': 'LASTX', 'X<>F': 'X<>F', '1/X': '1/X', 'X^2': 'X↑2', 'SQ': 'X↑2', 'EXP': 'E↑X', 'ALOG': '10↑X', 'Σ+': 'Σ+', 'RV': 'R↓', 'R^': 'R↑', '.END.': 'END', 'KEYX': 'KEYX', 'KEYG': 'KEYG', 'X<>0?': 'X≠0?', 'X<>Y?': 'X≠Y?', 'X2': 'X↑2', 'X⇔Y': 'X<>Y', 'X↔Y': 'X<>Y', 'X<->Y': 'X<>Y', 'Y^X': 'Y↑X', 'E^X-1': 'E↑X-1' };
+  for (const a in ALIAS) LOOK[norm(a)] = CMDS[ALIAS[a]];
+
+  // ---- argument encoding ----
+  const STK = { T: 0x70, Z: 0x71, Y: 0x72, X: 0x73, L: 0x74 };
+  function parseArg(s) {
+    s = s.trim();
+    if (!s) return null;
+    let ind = false;
+    const m = s.match(/^IND\s+(.*)$/i);
+    if (m) { ind = true; s = m[1].trim(); }
+    let a;
+    if (s[0] === '"') { if (s.length < 2 || !s.endsWith('"')) throw 'Unterminated name'; a = { t: 'str', v: s.slice(1, -1) }; }
+    else if (/^ST\s*[XYZTL]$/i.test(s)) a = { t: 'stk', v: s.slice(-1).toUpperCase() };
+    else if (/^\d+$/.test(s)) a = { t: 'num', v: parseInt(s, 10) };
+    else if (/^[A-Ja-e]$/.test(s)) a = { t: 'lbl', v: s };
+    else throw `Bad argument "${s}"`;
+    a.ind = ind;
+    return a;
+  }
+  function suffix(a, allowLbl) {
+    if (a.t === 'num') { if (a.v > 99) throw 'Register / number must be 0–99'; return (a.ind ? 0x80 : 0) + a.v; }
+    if (a.t === 'stk') return (a.ind ? 0x80 : 0) + STK[a.v];
+    if (a.t === 'lbl') {
+      if (!allowLbl || a.ind) throw 'Local label not allowed here';
+      return a.v <= 'J' ? 0x66 + a.v.charCodeAt(0) - 65 : 0x7b + a.v.charCodeAt(0) - 97;
+    }
+    throw 'Name not allowed here';
+  }
+  function strArg(code, name, extra = [], pre = []) {
+    const b = strToBytes(name);
+    if (!b.length) throw 'Empty name';
+    const ext = code < 0x80;
+    const body = [...(ext ? [0xa7] : []), code, ...pre, ...b, ...extra];
+    if (body.length > 15) throw 'Name too long';
+    return [0xf0 + body.length, ...body];
+  }
+  function numArg(c, a) { // default numeric path
+    const s = suffix(a, false);
+    if (c.c1 === 0xf2) return c.c2 < 0x80 ? [0xf3, 0xa7, c.c2, s] : [0xf2, c.c2, s];
+    if (c.c1 === 0 && c.c2) return [c.c2, s];
+    throw `${c.name} needs a name argument`;
+  }
+
+  // ---- encode one instruction (text without line number/comment) ----
+  const NUMRE = /^-?(\d+\.?\d*|\.\d+)?([Eᴇ]-?\d+)?$/i;
+  function encodeLine(s) {
+    s = s.trim();
+    if (/^(├|⊢|\|-)?".*"$/.test(s)) { // string literal
+      const app = !s.startsWith('"');
+      const txt = s.slice(s.indexOf('"') + 1, -1);
+      const b = [...(app ? [127] : []), ...strToBytes(txt)];
+      if (b.length > 15) throw 'String longer than 15 characters';
+      return { bytes: [0xf0 + b.length, ...b], text: (app ? '├' : '') + '"' + txt + '"' };
+    }
+    if (/\d/.test(s) && NUMRE.test(s) && !/^\d+$/.test(s) || /^\d+$/.test(s)) {
+      const t = s.toUpperCase().replace('ᴇ', 'E');
+      const b = Array.from(t, ch => ch === '.' ? 0x1a : ch === 'E' ? 0x1b : ch === '-' ? 0x1c : 0x10 + +ch);
+      return { bytes: [...b, 0x00], text: t, num: true };
+    }
+    let m = s.match(/^(\S+)\s*(.*)$/);
+    let name = m[1], rest = m[2];
+    // "STO + 01" style
+    const ar = rest.match(/^([-+×÷*/xX])\s+(\S.*)$/);
+    if (ar && /^(STO|RCL)$/i.test(name)) { name += ar[1]; rest = ar[2]; }
+    // KEY n XEQ/GTO arg
+    const k = s.match(/^KEY\s*(\d)\s+(XEQ|GTO)\s+(.+)$/i);
+    if (k) {
+      const key = +k[1], g = k[2].toUpperCase() === 'GTO', a = parseArg(k[3]);
+      if (key < 1 || key > 9) throw 'Key must be 1–9';
+      const bytes = a.t === 'str' ? strArg((g ? 0xc3 : 0xc2) + (a.ind ? 8 : 0), a.v, [], [key]) : [0xf3, g ? 0xe3 : 0xe2, key, suffix(a, true)];
+      return { bytes, text: `KEY ${key} ${g ? 'GTO' : 'XEQ'} ${fmtArg(a, 2)}` };
+    }
+    const as = s.match(/^ASSIGN\s+(".*")\s+TO\s+(\d+)$/i);
+    if (as) {
+      const a = parseArg(as[1]), key = +as[2];
+      if (key < 1 || key > 18) throw 'ASSIGN key must be 01–18';
+      return { bytes: strArg(0xc0, a.v, [key - 1]), text: `ASSIGN ${as[1]} TO ${String(key).padStart(2, '0')}` };
+    }
+    const xr = s.match(/^XROM\s+(\d+)\s*,\s*(\d+)$/i);
+    if (xr) {
+      const mm = +xr[1], ff = +xr[2]; if (mm > 31 || ff > 63) throw 'XROM out of range';
+      return { bytes: [0xa0 | (mm >> 2), ((mm & 3) << 6) | ff], text: `XROM ${String(mm).padStart(2, '0')},${String(ff).padStart(2, '0')}` };
+    }
+    const hx = s.match(/^HEX\s+([0-9A-Fa-f\s]+)$/i);
+    if (hx) { const b = hx[1].trim().split(/\s+/).map(x => parseInt(x, 16)); return { bytes: b, text: 'HEX ' + hexs(b) }; }
+    const c = LOOK[norm(name)];
+    if (!c) throw `Unknown instruction "${name}"`;
+    const a = parseArg(rest);
+    const t = c.name + (a ? ' ' + fmtArg(a, c.at === 'N9' ? 1 : 2) : '');
+    const need = () => { if (!a) throw `${c.name} needs an argument`; };
+    switch (c.name) {
+      case 'END': if (a) throw 'END takes no argument'; return { bytes: [0xc0, 0x00, 0x0d], text: 'END', end: true };
+      case 'LBL': need();
+        if (a.ind) throw 'LBL cannot be indirect';
+        if (a.t === 'str') { const b = strToBytes(a.v); if (!b.length || b.length > 14) throw 'Label must be 1–14 characters'; return { bytes: [0xc0, 0x00, 0xf1 + b.length, 0x00, ...b], text: t, glob: true }; }
+        if (a.t === 'num' && a.v <= 14) return { bytes: [0x01 + a.v], text: t };
+        return { bytes: [0xcf, suffix(a, true)], text: t };
+      case 'GTO': case 'XEQ': { need(); const x = c.name === 'XEQ';
+        if (a.t === 'str') {
+          if (a.ind) return { bytes: strArg(x ? 0xaf : 0xae, a.v), text: t };
+          const b = strToBytes(a.v); if (!b.length || b.length > 14) throw 'Label must be 1–14 characters';
+          return { bytes: [x ? 0x1e : 0x1d, 0xf0 + b.length, ...b], text: t };
+        }
+        if (a.ind) return { bytes: [0xae, suffix({ ...a, ind: false }) | (x ? 0x80 : 0)], text: t };
+        if (!x && a.t === 'num' && a.v <= 14) return { bytes: [0xb1 + a.v, 0x00], text: t };
+        return { bytes: [x ? 0xe0 : 0xd0, 0x00, suffix(a, true)], text: t };
+      }
+      case 'SIZE': need(); if (a.t !== 'num' || a.ind || a.v > 9999) throw 'SIZE needs 0–9999';
+        return { bytes: [0xf3, 0xf7, a.v >> 8, a.v & 255], text: 'SIZE ' + String(a.v).padStart(4, '0') };
+      case 'XSTR': { need(); if (a.t !== 'str' || a.ind) throw 'XSTR needs a "string"';
+        const b = strToBytes(a.v), out = [];
+        if (!b.length) return { bytes: [0xf2, 0xa7, 0x41], text: t };
+        for (let i = 0; i < b.length; i += 13) { const ch = b.slice(i, i + 13), last = i + 13 >= b.length; out.push(0xf2 + ch.length, 0xa7, last ? 0x41 : 0x49, ...ch); }
+        return { bytes: out, text: t };
+      }
+      case 'KEYX': case 'KEYG': case 'ASSIGN': throw `Use "KEY n XEQ/GTO …" or 'ASSIGN "name" TO nn'`;
+    }
+    if (c.at === 'N') { if (a) throw `${c.name} takes no argument`; return { bytes: c.c1 ? [c.c1, c.c2] : [c.c2], text: t }; }
+    need();
+    if (a.t === 'str') {
+      if (!c.sc) throw `${c.name} does not take a name`;
+      if (!a.ind && /^N/.test(c.at) && c.at !== 'NM') throw `${c.name} takes a number or IND`;
+      if (c.at === 'F') throw 'FUNC takes a number';
+      return { bytes: strArg(c.sc + (a.ind ? 8 : 0), a.v), text: t };
+    }
+    if (a.t === 'lbl') throw 'Local label not allowed here';
+    if (['NM', 'RV', 'M', 'P'].includes(c.at) && !a.ind) throw `${c.name} needs a name or IND argument`;
+    if (c.at === 'N9' && !a.ind && a.t === 'num' && a.v > 9) throw `${c.name} needs 0–9`;
+    if (c.at === 'N11' && !a.ind) {
+      if (a.t === 'num' && a.v > 11) throw `${c.name} needs 0–11`;
+      if (a.t === 'num' && a.v >= 10) return { bytes: [0xf1, { FIX: 0xd5, SCI: 0xd6, ENG: 0xd7 }[c.name] + (a.v === 11 ? 0x10 : 0)], text: t };
+    }
+    if (c.at === 'F' && (a.ind || a.t !== 'num')) throw `${c.name} needs a number`;
+    if (c.name === 'STO' && a.t === 'num' && !a.ind && a.v <= 15) return { bytes: [0x30 + a.v], text: t };
+    if (c.name === 'RCL' && a.t === 'num' && !a.ind && a.v <= 15) return { bytes: [0x20 + a.v], text: t };
+    return { bytes: numArg(c, a), text: t };
+  }
+  const p2 = (n, w) => String(n).padStart(w, '0');
+  function fmtArg(a, w) {
+    const ind = a.ind ? 'IND ' : '';
+    if (a.t === 'str') return ind + '"' + a.v + '"';
+    if (a.t === 'stk') return ind + 'ST ' + a.v;
+    if (a.t === 'lbl') return a.v;
+    return ind + p2(a.v, a.ind ? 2 : w);
+  }
+  const hexs = b => Array.from(b, x => x.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+
+  // ---- split a listing line into line-number / code / comment ----
+  function splitLine(raw) {
+    let code = '', comment = null, inStr = false;
+    for (let i = 0; i < raw.length; i++) {
+      const ch = raw[i];
+      if (ch === '"') { if (!inStr) inStr = true; else if (i + 1 >= raw.length || /[\s']/.test(raw[i + 1])) inStr = false; }
+      if (ch === "'" && !inStr) { comment = raw.slice(i); break; }
+      code += ch;
+    }
+    code = code.trim();
+    const m = code.match(/^(\d+)(?:\s*[▸►>◆]\s*|\s+)(\S.*)$/);
+    if (m) code = m[2];
+    code = code.replace(/^[▸►◆]\s*/, '');
+    return { code, comment };
+  }
+
+  // ---- encode full listing ----
+  function encode(text) {
+    const lines = text.replace(/\r/g, '').split('\n');
+    const progs = []; let cur = null; const errors = [], items = [];
+    const start = () => { cur = { lines: [], bytes: [] }; progs.push(cur); };
+    lines.forEach((raw, i) => {
+      const { code, comment } = splitLine(raw);
+      if (!code) { items.push({ blank: true, comment, raw }); return; }
+      if (/^\{.*Byte\s*Prgm\s*\}$/i.test(code)) { items.push({ header: true, comment }); return; }
+      try {
+        const r = encodeLine(code);
+        if (!cur) start();
+        cur.lines.push(r); cur.bytes.push(...r.bytes);
+        items.push({ prog: cur, r, comment });
+        if (r.end) cur = null;
+      } catch (e) { errors.push({ line: i + 1, msg: String(e), src: raw.trim() }); items.push({ blank: true, comment: null, raw }); }
+    });
+    if (cur && cur.lines.length) { const r = { bytes: [0xc0, 0x00, 0x0d], text: 'END', end: true, auto: true }; cur.lines.push(r); cur.bytes.push(...r.bytes); items.push({ prog: cur, r, comment: null }); }
+    for (const p of progs) p.size = p.bytes.length - 3;
+    const bytes = progs.flatMap(p => p.bytes);
+    return { progs, bytes: Uint8Array.from(bytes), errors, items };
+  }
+
+  // reformat listing: renumber, fresh headers, keep comments
+  function format(enc) {
+    const out = []; let n = 0, last = null, pend = [];
+    const pad = (s, c) => c ? (s.length < 22 ? s.padEnd(22) : s + '  ') + c : s;
+    for (const it of enc.items) {
+      if (it.header) continue;
+      if (it.blank) { pend.push(it.comment || (it.raw && it.raw.trim()) || ''); continue; }
+      if (it.prog !== last) {
+        if (last) out.push('');
+        out.push(`0000 { ${it.prog.size}-Byte Prgm }`); n = 0; last = it.prog;
+        while (pend.length && pend[0] === '') pend.shift();
+      }
+      out.push(...pend); pend = [];
+      out.push(pad(`${p2(++n, 4)} ${it.r.text}`, it.comment));
+    }
+    out.push(...pend);
+    while (out.length && out[out.length - 1] === '') out.pop();
+    return out.join('\n');
+  }
+
+  // ---- decode raw bytes ----
+  function sfx(b, lblCtx) {
+    const ind = !!(b & 0x80), v = b & 0x7f;
+    if (v <= 99) return { t: 'num', v, ind };
+    if (v >= 0x70 && v <= 0x74) return { t: 'stk', v: 'TZYXL'[v - 0x70], ind };
+    if (lblCtx && !ind && v >= 0x66 && v <= 0x6f) return { t: 'lbl', v: String.fromCharCode(65 + v - 0x66) };
+    if (lblCtx && !ind && v >= 0x7b) return { t: 'lbl', v: String.fromCharCode(97 + v - 0x7b) };
+    return null;
+  }
+  function decode(bytes) {
+    const progs = []; let cur = null, i = 0;
+    const emit = (text, len, isEnd) => {
+      if (!cur) { cur = { lines: [], size: 0 }; progs.push(cur); }
+      cur.lines.push({ text, hex: hexs(bytes.slice(i, i + len)) });
+      if (!isEnd) cur.size += len; else cur = null;
+      i += len;
+    };
+    while (i < bytes.length) {
+      const b = bytes[i], n1 = bytes[i + 1], n2 = bytes[i + 2];
+      const raw = len => emit('HEX ' + hexs(bytes.slice(i, i + len)), len);
+      if (b === 0x00) { i++; if (cur) cur.size++; continue; }
+      if (b <= 0x0f) { emit('LBL ' + p2(b - 1, 2), 1); continue; }
+      if (b <= 0x1c) {
+        let j = i, s = '';
+        while (j < bytes.length && bytes[j] >= 0x10 && bytes[j] <= 0x1c) { const x = bytes[j++]; s += x === 0x1a ? '.' : x === 0x1b ? 'E' : x === 0x1c ? '-' : String(x - 0x10); }
+        if (bytes[j] === 0x00) j++; // number terminator belongs to the number
+        emit(s, j - i); continue;
+      }
+      if (b === 0x1d || b === 0x1e) {
+        const len = (n1 & 0x0f); if (n1 >> 4 !== 0xf) { raw(1); continue; }
+        emit(`${b === 0x1d ? 'GTO' : 'XEQ'} "${bytesToStr(bytes.slice(i + 2, i + 2 + len))}"`, 2 + len); continue;
+      }
+      if (b >= 0x20 && b <= 0x3f) { emit(`${b < 0x30 ? 'RCL' : 'STO'} ${p2(b & 15, 2)}`, 1); continue; }
+      if (ONE[b]) { emit(ONE[b].name, 1); continue; }
+      if (POST[b] && b !== 0xae) { const a = sfx(n1, false); if (!a) { raw(2); continue; } emit(`${POST[b].name} ${fmtArg(a, POST[b].at === 'N9' ? 1 : 2)}`, 2); continue; }
+      if (b === 0xae) { const x = n1 & 0x80; const a = sfx(n1 & 0x7f, false); if (!a) { raw(2); continue; } a.ind = true; emit(`${x ? 'XEQ' : 'GTO'} ${fmtArg(a, 2)}`, 2); continue; }
+      if (b >= 0xa0 && b <= 0xa7) { const c = XROM[(b << 8) | n1]; emit(c ? c.name : `XROM ${p2(((b & 7) << 2) | (n1 >> 6), 2)},${p2(n1 & 63, 2)}`, 2); continue; }
+      if (b >= 0xb1 && b <= 0xbf) { emit('GTO ' + p2(b - 0xb1, 2), 2); continue; }
+      if (b >= 0xc0 && b <= 0xcd) {
+        if (n2 >= 0xf1) { const len = (n2 & 15) - 1; emit(`LBL "${bytesToStr(bytes.slice(i + 4, i + 4 + len))}"`, 4 + len); }
+        else emit('END', 3, true);
+        continue;
+      }
+      if (b === 0xcf) { const a = sfx(n1, true); if (!a || a.ind) { raw(2); continue; } emit('LBL ' + fmtArg(a, 2), 2); continue; }
+      if (b >= 0xd0 && b <= 0xef) { const a = sfx(n2 & 0x7f, true); if (!a) { raw(3); continue; } emit(`${b < 0xe0 ? 'GTO' : 'XEQ'} ${fmtArg(a, 2)}`, 3); continue; }
+      if (b === 0xf0) { emit('NOP', 1); continue; }
+      if (b >= 0xf1) {
+        const L = b & 15, body = bytes.slice(i + 1, i + 1 + L);
+        if (body.length < L) { raw(bytes.length - i); continue; }
+        const op = body[0];
+        if (op < 0x80) { const app = op === 127; emit((app ? '├' : '') + '"' + bytesToStr(body.slice(app ? 1 : 0)) + '"', 1 + L); continue; }
+        if (L === 1 && [0xd5, 0xd6, 0xd7, 0xe5, 0xe6, 0xe7].includes(op)) { emit(`${['FIX', 'SCI', 'ENG'][(op & 15) - 5]} ${op < 0xe0 ? 10 : 11}`, 2); continue; }
+        if (L === 3 && op === 0xf7) { emit('SIZE ' + p2((body[1] << 8) | body[2], 4), 4); continue; }
+        if (L === 3 && (op === 0xe2 || op === 0xe3)) { const a = sfx(body[2], true); if (!a) { raw(4); continue; } emit(`KEY ${body[1]} ${op === 0xe3 ? 'GTO' : 'XEQ'} ${fmtArg(a, 2)}`, 4); continue; }
+        if (op === 0xc0 && L >= 3) { emit(`ASSIGN "${bytesToStr(body.slice(1, -1))}" TO ${p2(body[L - 1] + 1, 2)}`, 1 + L); continue; }
+        if ([0xc2, 0xc3, 0xca, 0xcb].includes(op) && L >= 3) { emit(`KEY ${body[1]} ${op & 1 ? 'GTO' : 'XEQ'} ${op & 8 ? 'IND ' : ''}"${bytesToStr(body.slice(2))}"`, 1 + L); continue; }
+        if (op === 0xa7) {
+          const c2 = body[1];
+          if (c2 === 0x41 || c2 === 0x49) { // XSTR chunks
+            let j = i, s = [];
+            while (true) { const LL = bytes[j] & 15, more = bytes[j + 2] === 0x49; s.push(...bytes.slice(j + 3, j + 1 + LL)); j += 1 + LL; if (!more || bytes[j + 1] !== 0xa7) break; }
+            emit(`XSTR "${bytesToStr(s)}"`, j - i); continue;
+          }
+          if (L === 3 && F2[c2]) { const a = sfx(body[2], false); if (!a) { raw(4); continue; } emit(`${F2[c2].name} ${fmtArg(a, F2[c2].at === 'N9' ? 1 : 2)}`, 4); continue; }
+          if (SC[c2] && L >= 3) { const { c, ind } = SC[c2]; emit(`${c.name} ${ind ? 'IND ' : ''}"${bytesToStr(body.slice(2))}"`, 1 + L); continue; }
+          raw(1 + L); continue;
+        }
+        if (L === 2 && F2[op]) { const a = sfx(body[1], false); if (!a) { raw(3); continue; } emit(`${F2[op].name} ${fmtArg(a, F2[op].at === 'N9' ? 1 : 2)}`, 3); continue; }
+        if (SC[op] && L >= 2) { const { c, ind } = SC[op]; emit(`${c.name} ${ind ? 'IND ' : ''}"${bytesToStr(body.slice(1))}"`, 1 + L); continue; }
+        raw(1 + L); continue;
+      }
+      raw(1);
+    }
+    return progs;
+  }
+  function listing(progs) {
+    return progs.map(p => [`0000 { ${p.size}-Byte Prgm }`, ...p.lines.map((l, k) => `${p2(k + 1, 4)} ${l.text}`)].join('\n')).join('\n\n');
+  }
+  function hexListing(progs) {
+    return progs.map(p => [`; { ${p.size}-Byte Prgm }`, ...p.lines.map((l, k) => `${p2(k + 1, 4)}: ${l.hex}`)].join('\n')).join('\n\n');
+  }
+  function parseHex(t) {
+    const out = [];
+    for (let line of t.replace(/\r/g, '').split('\n')) {
+      line = line.replace(/;.*$/, '').replace(/^\s*\d+\s*:/, '');
+      for (const tok of line.match(/[0-9A-Fa-f]{2}/g) || []) out.push(parseInt(tok, 16));
+    }
+    return Uint8Array.from(out);
+  }
+  return { encode, decode, format, listing, hexListing, parseHex, hexs, encodeLine };
+})();
+
+
+</script>
+<script>
+{
+const $ = id => document.getElementById(id);
+const src = $('src'), hex = $('hex'), status = $('status');
+let lastBytes = null, lastName = 'PROGRAM';
+
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function say(html) { status.innerHTML = html; }
+function counts() {
+  const n = src.value.split('\n').filter(l => l.trim()).length;
+  $('lcount').textContent = n ? n + ' lines' : '';
+  $('hcount').textContent = lastBytes ? lastBytes.length + ' bytes in file' : '';
+}
+function nameFrom(progs) {
+  for (const p of progs) for (const l of (p.lines || [])) {
+    const m = (l.text || '').match(/^LBL "(.+)"$/);
+    if (m) return m[1].replace(/[^\w\-+.]/g, '_') || 'PROGRAM';
+  }
+  return 'PROGRAM';
+}
+function summary(progs) {
+  return progs.map(p => `${esc(nameFrom([p]))} ${p.size} B`).join(' · ');
+}
+
+function doEncode() {
+  const e = DM42.encode(src.value);
+  if (!e.progs.length && !e.errors.length) { say('<span class="err">Nothing to encode.</span>'); return; }
+  lastBytes = e.bytes;
+  const dec = DM42.decode(e.bytes);
+  hex.value = DM42.hexListing(dec);
+  lastName = nameFrom(dec);
+  if ($('renum').checked) {
+    const pos = src.selectionStart;
+    src.value = DM42.format(e);
+    src.selectionStart = src.selectionEnd = Math.min(pos, src.value.length);
+  }
+  if (e.errors.length) {
+    say(`<span class="err">${e.errors.length} line${e.errors.length > 1 ? 's' : ''} not encoded:</span><br>` +
+      e.errors.map(x => `<a data-src="${esc(x.src)}">${esc(x.src)}</a> — ${esc(x.msg)}`).join('<br>'));
+  } else say(`<span class="ok">Encoded ${e.progs.length} program${e.progs.length > 1 ? 's' : ''}, ${e.bytes.length} bytes.</span> ${summary(e.progs)}`);
+  counts();
+}
+function showDecoded(bytes, from) {
+  if (!bytes.length) { say('<span class="err">No bytes found.</span>'); return; }
+  lastBytes = bytes;
+  const progs = DM42.decode(bytes);
+  src.value = DM42.listing(progs);
+  hex.value = DM42.hexListing(progs);
+  lastName = nameFrom(progs);
+  const unk = progs.reduce((n, p) => n + p.lines.filter(l => l.text.startsWith('HEX ')).length, 0);
+  say(`<span class="ok">Decoded ${progs.length} program${progs.length > 1 ? 's' : ''} from ${esc(from)} (${bytes.length} bytes).</span> ${summary(progs)}` +
+    (unk ? ` <span class="err">${unk} unrecognised instruction${unk > 1 ? 's' : ''} kept as HEX lines.</span>` : ''));
+  counts();
+}
+function doDecode() { showDecoded(DM42.parseHex(hex.value), 'hex'); }
+
+status.addEventListener('click', ev => {
+  const a = ev.target.closest('a[data-src]'); if (!a) return;
+  const i = src.value.indexOf(a.dataset.src); if (i < 0) return;
+  src.focus(); src.setSelectionRange(i, i + a.dataset.src.length);
+});
+
+// ---- files in ----
+async function loadFile(f) {
+  if (!f) return;
+  const buf = new Uint8Array(await f.arrayBuffer());
+  const textLike = /\.(txt|42s|free42|hp42s|lst)$/i.test(f.name) ||
+    (!/\.raw$/i.test(f.name) && !buf.some(b => b < 9 || (b > 13 && b < 32)));
+  if (textLike) { src.value = new TextDecoder().decode(buf); doEncode(); say(status.innerHTML.replace('Encoded', 'Loaded ' + esc(f.name) + ' and encoded')); }
+  else showDecoded(buf, f.name);
+}
+$('file').addEventListener('change', e => { loadFile(e.target.files[0]); e.target.value = ''; });
+for (const t of [src, hex]) {
+  t.addEventListener('dragover', e => { e.preventDefault(); t.classList.add('drag'); });
+  t.addEventListener('dragleave', () => t.classList.remove('drag'));
+  t.addEventListener('drop', e => { e.preventDefault(); t.classList.remove('drag'); loadFile(e.dataTransfer.files[0]); });
+}
+
+// ---- files out ----
+const crcT = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function zip1(name, data) { // single stored entry
+  let crc = 0xffffffff; for (const b of data) crc = crcT[(crc ^ b) & 255] ^ (crc >>> 8); crc = (crc ^ 0xffffffff) >>> 0;
+  const nm = new TextEncoder().encode(name), L = 30 + nm.length, C = 46 + nm.length;
+  const out = new Uint8Array(L + data.length + C + 22), v = new DataView(out.buffer);
+  const hdr = (o, sig, central) => {
+    v.setUint32(o, sig, true); let p = o + 4;
+    if (central) { v.setUint16(p, 20, true); p += 2; }
+    v.setUint16(p, 20, true); v.setUint16(p + 2, 0, true); v.setUint16(p + 4, 0, true);
+    v.setUint16(p + 6, 0, true); v.setUint16(p + 8, 0x21, true);
+    v.setUint32(p + 10, crc, true); v.setUint32(p + 14, data.length, true); v.setUint32(p + 18, data.length, true);
+    v.setUint16(p + 22, nm.length, true); v.setUint16(p + 24, 0, true); p += 26;
+    if (central) p += 14; // comment len, disk, attrs, offset (all 0)
+    out.set(nm, p);
+  };
+  hdr(0, 0x04034b50, false); out.set(data, L);
+  hdr(L + data.length, 0x02014b50, true);
+  const e = L + data.length + C; v.setUint32(e, 0x06054b50, true);
+  v.setUint16(e + 8, 1, true); v.setUint16(e + 10, 1, true); v.setUint32(e + 12, C, true); v.setUint32(e + 16, L + data.length, true);
+  return out;
+}
+const inHost = !!(window.claude && window.claude.use);
+let dl = null;
+if (inHost) window.claude.use('downloads').then(d => { dl = d; }).catch(() => {});
+function anchorSave(name, data, type) {
+  const url = URL.createObjectURL(new Blob([data], { type }));
+  const a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+async function save(name, data, type) {
+  if (!inHost) { anchorSave(name, data, type); return true; }
+  if (!dl) { say('<span class="err">Saving files is not available in this view.</span> Use Copy instead, or open the standalone HTML file.'); return false; }
+  try { await dl.save({ filename: name, data }); return true; }
+  catch (e) { if (e && e.code !== 'declined') say(`<span class="err">Could not save: ${esc(e.message || e.code)}</span>`); return false; }
+}
+$('saveRaw').addEventListener('click', async () => {
+  if (!lastBytes || !lastBytes.length) doEncode();
+  if (!lastBytes || !lastBytes.length) return;
+  if (inHost) { // .raw is not an allowed download type inside Claude: wrap it in a zip
+    if (await save(lastName + '.zip', zip1(lastName + '.raw', lastBytes))) say(`<span class="ok">Saved ${esc(lastName)}.zip containing ${esc(lastName)}.raw (${lastBytes.length} bytes).</span>`);
+  } else if (await save(lastName + '.raw', lastBytes, 'application/octet-stream')) say(`<span class="ok">Saved ${esc(lastName)}.raw (${lastBytes.length} bytes).</span>`);
+});
+$('saveTxt').addEventListener('click', async () => {
+  if (!src.value.trim()) return;
+  if (await save(lastName + '.txt', src.value, 'text/plain;charset=utf-8')) say(`<span class="ok">Saved ${esc(lastName)}.txt.</span>`);
+});
+document.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText($(b.dataset.copy).value); b.textContent = 'Copied'; }
+  catch { $(b.dataset.copy).select(); b.textContent = 'Press Ctrl+C'; }
+  setTimeout(() => b.textContent = 'Copy', 1500);
+}));
+
+$('enc').addEventListener('click', doEncode);
+$('dec').addEventListener('click', doDecode);
+$('clear').addEventListener('click', () => { src.value = hex.value = ''; lastBytes = null; say('<span class="ok">Cleared.</span>'); counts(); try { localStorage.removeItem('dm42src'); } catch {} });
+src.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); doEncode(); } });
+hex.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); doDecode(); } });
+src.addEventListener('input', () => { counts(); try { localStorage.setItem('dm42src', src.value); } catch {} });
+
+const SAMPLE = `' Example: quadratic solver  a·x² + b·x + c = 0
+LBL "QUAD"          ' global label
+MVAR "A"
+MVAR "B"
+MVAR "C"
+VARMENU "QUAD"
+STOP
+EXITALL
+RCL "B"
++/-
+RCL "B"
+X↑2
+4
+RCL× "A"
+RCL× "C"
+-
+SQRT               ' complex result if negative (CPXRES)
+STO 01
++
+2
+RCL× "A"
+STO 02
+÷
+"X1="
+ARCL ST X
+AVIEW
+STOP
+RCL "B"
++/-
+RCL- 01
+RCL÷ 02
+"X2="
+ARCL ST X
+AVIEW
+END`;
+$('sample').addEventListener('click', () => { src.value = SAMPLE; doEncode(); });
+
+let saved = null; try { saved = localStorage.getItem('dm42src'); } catch {}
+src.value = saved || SAMPLE; doEncode();
+}
+</script>
+</body>
+</html>
