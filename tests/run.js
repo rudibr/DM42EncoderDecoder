@@ -102,5 +102,10 @@ check(pm.errors.length === 1 && pm.errors[0].line === 3 && pm.progs[0].lines.map
 check(D.encode("'A*B'").progs.length === 0 && /Plus42 mode/.test(D.encode('`A*B`').errors[0].msg) && /Plus42 mode/.test(D.encode('12_km').errors[0].msg), 'DM42 mode: \' is a comment, ` and unit literals ask for Plus42 mode');
 check(!D.decode(D.encode('LBL "A"\n"x↑"').bytes).plus42, 'plain DM42 programs are not flagged as Plus42');
 
+// 9. The built-in example must encode cleanly in both modes, and ' errors in Plus42 mode explain why.
+const sample = fs.readFileSync(path.join(__dirname, '..', 'DM42EncoderDecoder.html'), 'utf8').match(/const SAMPLE = `([\s\S]*?)`;/)[1];
+for (const m of [false, true]) { const r = D.encode(sample, { plus42: m }); check(!r.errors.length && r.progs[0].size === 78, `example QUAD encodes, 78 bytes (${m ? 'Plus42' : 'DM42'} mode)`); }
+check(/Plus42 mode is on/.test(D.encode(`LBL "Q" ' note`, { plus42: true }).errors[0].msg), "Plus42 mode: a ' comment gives a hint");
+
 console.log(fails ? `\n${fails} FAILED` : '\nAll tests passed');
 process.exit(fails ? 1 : 0);

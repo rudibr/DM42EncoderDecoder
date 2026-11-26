@@ -36,6 +36,8 @@ main{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:14px;
 .ph{flex-wrap:wrap}.ph>span:not(.opts){flex:1}.opts{order:3;flex-basis:100%;display:flex;flex-wrap:wrap;gap:0 18px;margin-top:-2px}.opts .chk{min-height:28px}
 input[type=checkbox]{accent-color:var(--acc);width:15px;height:15px}
 .ro{color:var(--acc)}
+#modeTag{font:600 12px "Inter Tight",sans-serif;padding:3px 8px;border-radius:5px;background:#2a2e32;color:var(--dim)}
+#modeTag.on{background:#3a2a12;color:var(--acc)}
 textarea[readonly]{background:#101213;cursor:default}
 textarea{width:100%;height:min(66vh,640px);min-height:320px;resize:vertical;border:0;margin:0;padding:12px 14px;background:var(--pane);color:var(--ink);font:14px/1.55 "JetBrains Mono",ui-monospace,monospace;tab-size:4;white-space:pre;overflow:auto}
 textarea::placeholder{color:#5d6266}
@@ -62,6 +64,7 @@ textarea.drag{outline:2px dashed var(--acc);outline-offset:-6px}
   <button class="pri" id="dec">← Decode</button>
   <label class="chk"><input type="checkbox" id="renum" checked> Renumber listing on encode</label>
   <label class="chk" title="Plus42 listings: ↑ in strings is byte 1E, 'A*B' and `A*B` are equations, 12_km is a unit value, comments use ; or @"><input type="checkbox" id="p42"> Plus42 mode</label>
+  <span id="modeTag" aria-live="polite">DM42</span>
   <span class="sep"></span>
   <button id="saveRaw">Save .raw</button>
   <button id="saveTxt">Save .txt</button>
@@ -426,7 +429,11 @@ UVAL 00 a6 f3 N|XAXIS 57 f2 62 NM|XMAX 00 a7 1f N|XMIN 00 a7 1e N|YAXIS 70 f2 63
         cur.lines.push(r); cur.bytes.push(...r.bytes);
         items.push({ prog: cur, r, comment });
         if (r.end) cur = null;
-      } catch (e) { errors.push({ line: i + 1, msg: String(e), src: raw.trim() }); items.push({ blank: true, comment: null, raw }); }
+      } catch (e) {
+        let msg = String(e);
+        if (P42 && raw.includes("'")) msg += ". Plus42 mode is on, so ' starts an equation: use ; for comments, or turn Plus42 mode off";
+        errors.push({ line: i + 1, msg, src: raw.trim() }); items.push({ blank: true, comment: null, raw });
+      }
     });
     if (cur && cur.lines.length) { const r = { bytes: [0xc0, 0x00, 0x0d], text: 'END', end: true, auto: true }; cur.lines.push(r); cur.bytes.push(...r.bytes); items.push({ prog: cur, r, comment: null }); }
     for (const p of progs) p.size = p.bytes.length - 3;
@@ -612,6 +619,7 @@ let lastBytes = null, lastName = 'PROGRAM';
 const full = { src: '', hex: '' };
 const hides = ['srcHideC', 'srcHideN', 'hexHideC', 'hexHideN'];
 const mode = () => ({ plus42: $('p42').checked });
+function showMode() { const on = $('p42').checked; $('modeTag').textContent = on ? 'Plus42 syntax' : 'DM42 syntax'; $('modeTag').className = on ? 'on' : ''; }
 const hidden = side => $(side + 'HideC').checked || $(side + 'HideN').checked;
 function render(keepCaret) {
   const pos = src.selectionStart;
@@ -661,7 +669,7 @@ function showDecoded(bytes, from) {
   lastBytes = bytes;
   let progs = DM42.decode(bytes, mode()), switched = false;
   if (progs.plus42 && !$('p42').checked) { // Plus42 literals or the Plus42 ↑ found: switch mode and decode again
-    $('p42').checked = true; switched = true; try { localStorage.setItem('dm42p42', '1'); } catch {}
+    $('p42').checked = true; switched = true; showMode(); try { localStorage.setItem('dm42p42', '1'); } catch {}
     progs = DM42.decode(bytes, mode());
   }
   setSrc(DM42.listing(progs));
@@ -759,9 +767,10 @@ hex.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key ===
 src.addEventListener('input', () => { if (!src.readOnly) setSrc(src.value); counts(); });
 hex.addEventListener('input', () => { if (!hex.readOnly) full.hex = hex.value; });
 try { $('p42').checked = localStorage.getItem('dm42p42') === '1'; } catch {}
+showMode();
 $('p42').addEventListener('change', () => {
   try { localStorage.setItem('dm42p42', $('p42').checked ? '1' : '0'); } catch {}
-  render();
+  render(); showMode();
   say($('p42').checked
     ? `<span class="ok">Plus42 mode on.</span> ↑ in strings is byte 1E, 'A*B' / \`A*B\` are equations, 12_km is a unit value; comments use ; or @. Press Encode.`
     : `<span class="ok">DM42 mode.</span> ↑ and ^ are byte 5E; ' ; @ start comments. Press Encode.`);
@@ -772,8 +781,8 @@ for (const id of hides) {
 }
 for (const t of [src, hex]) t.addEventListener('beforeinput', () => { if (t.readOnly) say('<span class="err">This pane is read-only while comments or line numbers are hidden.</span> Untick the boxes to edit.'); });
 
-const SAMPLE = `' Example: quadratic solver  a·x² + b·x + c = 0
-LBL "QUAD"          ' global label
+const SAMPLE = `; Example: quadratic solver  a·x² + b·x + c = 0
+LBL "QUAD"          ; global label
 MVAR "A"
 MVAR "B"
 MVAR "C"
@@ -788,7 +797,7 @@ X↑2
 RCL× "A"
 RCL× "C"
 -
-SQRT               ' complex result if negative (CPXRES)
+SQRT               ; complex result if negative (CPXRES)
 STO 01
 +
 2
