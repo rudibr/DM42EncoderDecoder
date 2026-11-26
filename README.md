@@ -18,16 +18,22 @@ The demo types a short program and encodes it, opens `DPLOT.raw`, pastes hex and
 
 | | Example |
 |---|---|
-| Comments start with `'` or `;` outside a string | `STO 01   ' keep it`, `RTN ; done` |
+| Comments start with `'`, `;` or `@` outside a string | `STO 01   ' keep it`, `RTN ; done`, `X<>Y @ swap` |
 | Line numbers and the header are optional | `0001`, `01▸`, `01▶`, `01◆` |
 | Strings and append | `"TEXT"`, `├"MORE"` or `\|-"MORE"`; line feed `[LF]`, escape `[ESC]` |
 | Registers, stack, indirect, names | `STO 07`, `RCL ST X`, `STO IND 03`, `RCL "NAME"`, `XEQ IND "P"` |
+| Numbers | `1.5ᴇ-3` or `1.5E-3`, `ᴇ3`, `-ᴇ`, comma decimals `14,1041` |
 | Labels | `LBL "MAIN"`, `LBL 05`, `LBL A`, `LBL a` |
-| Menus and keys | `KEY 1 XEQ 01`, `ASSIGN "X" TO 03` |
+| Menus and keys | `KEY 1 XEQ 01`, `KEY -6 GTO 99` (shifted), `ASSIGN "X" TO 03`, `ASSIGN "X" TO -18` |
+| Synthetic registers | `RCL 122`, `LBL ST L` (100–127, as imported from HP-41 code) |
 | ASCII spellings | `/ * ^ -> <= >= != RDN CHS SIGMA+ x2` |
 | Unknown bytes | decode as `XROM mm,ff` or `HEX F2 …` and encode back unchanged |
 
 It covers the full HP-42S instruction set plus the Free42/DM42 extensions (`FUNC`, `LSTO`, `L4STK`, `X=?`, `XSTR`, …).
+Plus42's named instructions (directories, units, TVM, plotting, `EQNSLV`, `GTOL`, …) are supported too, with byte codes taken from Free42's `stress.raw`.
+Plus42 equation and unit literals (`'A*B'`, `40076_km`) are not: they reference a separate equation table.
+
+Character note: in DM42/Free42 listings `↑` and `^` are both byte `5E`. Plus42 listings write `↑` for byte `1E`; type `\x1E` for that.
 Byte codes follow Free42's `core_tables.cc` and `export_hp42s`. Numbers are terminated with `00` and END is written as `C0 00 0D`, the same as Free42.
 
 ## Tests
@@ -43,5 +49,7 @@ The tests load the codec straight from `DM42EncoderDecoder.html` and check:
 - **Published `{ n-Byte Prgm }` sizes** of 12 real programs from Eddie Shore's blog and the HP Museum forum,
   plus an encode → decode → encode round trip for each.
 - **Single instructions**, including Free42 extensions, indirect and stack arguments, local labels, comments and error reporting.
+- **Regression cases from Thomas Okken's [program library](https://thomasokken.com/free42/42progs/)**: all 84 `.raw`/`.txt` pairs there
+  (144 programs, 179 KB) were checked; see the report in the pull request that added these tests.
 
 The Free42-only extensions are checked against Free42's source tables and by round trip. No published `.raw` file containing them was available to compare against.
