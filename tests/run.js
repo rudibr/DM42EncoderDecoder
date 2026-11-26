@@ -45,5 +45,12 @@ const sc = D.encode(`LBL "S";entry\n"A;B" ; semicolon inside a string is text\nS
 check(!sc.errors.length && D.hexs(sc.bytes) === 'C0 00 F2 00 53 F3 41 3B 42 31 F8 69 74 27 73 3B 20 6F 6B C0 00 0D', '; comments, ; and \' inside strings kept as text');
 check(D.format(sc).includes('0003 STO 01           ; store') && D.format(sc).includes('; whole-line comment'), '; comments preserved when renumbering');
 
+// 5. EDLEN listing: ▶ label markers, ; comments, [LF] in strings, Free42 extensions.
+const ed = D.encode(f('edlen.txt'));
+check(!ed.errors.length && ed.progs.length === 1 && ed.progs[0].lines.length === 257, `EDLEN: 257 lines, no errors (${ed.errors.length} errors)`);
+check(D.hexs(D.encodeLine('├"°C[LF]RH="').bytes) === 'F7 7F 13 43 0A 52 48 3D', '[LF] encodes as one 0A byte');
+check(D.hexs(D.encode(D.listing(D.decode(ed.bytes))).bytes) === D.hexs(ed.bytes), 'EDLEN encode → decode → encode is stable');
+check(D.hexs(D.encodeLine('LBL "A▶"').bytes) === 'C0 00 F3 00 41 06', '▶ inside a string is still a character');
+
 console.log(fails ? `\n${fails} FAILED` : '\nAll tests passed');
 process.exit(fails ? 1 : 0);
