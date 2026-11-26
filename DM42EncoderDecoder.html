@@ -77,9 +77,9 @@ textarea.drag{outline:2px dashed var(--acc);outline-offset:-6px}
 <section class="ref">
   <h2>Listing syntax</h2>
   <div class="grid">
-    <div>Line numbers (<code>0001</code>, <code>01▸</code>, <code>01◆</code>) and the <code>{ n-Byte Prgm }</code> header are optional; they are rebuilt on encode.</div>
+    <div>Line numbers (<code>0001</code>, <code>01▸</code>, <code>01▶</code>, <code>01◆</code>) and the <code>{ n-Byte Prgm }</code> header are optional; they are rebuilt on encode.</div>
     <div>Comments start with <code>'</code> or <code>;</code> outside a string: <code>STO 01 ' keep it</code>, <code>RTN ; done</code>. Inside <code>"it's; ok"</code> both are text.</div>
-    <div>Strings: <code>"TEXT"</code>, append with <code>├"MORE"</code> or <code>|-"MORE"</code>. Up to 15 characters.</div>
+    <div>Strings: <code>"TEXT"</code>, append with <code>├"MORE"</code> or <code>|-"MORE"</code>. Up to 15 characters. Line feed: <code>[LF]</code>, escape: <code>[ESC]</code>.</div>
     <div>Arguments: <code>STO 07</code>, <code>RCL ST X</code>, <code>STO IND 03</code>, <code>VIEW IND ST Y</code>, <code>RCL "NAME"</code>, <code>XEQ IND "P"</code>.</div>
     <div>Labels: <code>LBL "MAIN"</code>, <code>LBL 05</code>, <code>LBL A</code>/<code>a</code>; <code>KEY 1 XEQ 01</code>, <code>ASSIGN "X" TO 03</code>.</div>
     <div>ASCII is accepted: <code>/ * ^ -&gt; &lt;= &gt;= != RDN CHS SIGMA+</code>. Free42 extensions such as <code>FUNC</code>, <code>LSTO</code>, <code>X=?</code>, <code>XSTR</code> are supported.</div>
@@ -159,12 +159,14 @@ X=? 04 f2 14 V|X≠? 05 f2 15 V|X<? 06 f2 16 V|X>? 07 f2 17 V|X≤? 20 f2 18 V|X
 
   // ---- HP-42S character set <-> Unicode ----
   const LOW = '÷×√∫░Σ▶π¿≤␊≥≠↵↓→←µ£°ÅÑÄ∡ᴇÆ…␛ÖÜ▒•';
-  const toUni = b => b < 32 ? LOW[b] : b === 94 ? '↑' : b === 127 ? '├' : b < 127 ? String.fromCharCode(b) : '\\x' + b.toString(16).toUpperCase().padStart(2, '0');
+  const toUni = b => b === 10 ? '[LF]' : b === 27 ? '[ESC]' : b < 32 ? LOW[b] : b === 94 ? '↑' : b === 127 ? '├' : b < 127 ? String.fromCharCode(b) : '\\x' + b.toString(16).toUpperCase().padStart(2, '0');
   const bytesToStr = a => Array.from(a, toUni).join('');
   function strToBytes(s) {
     const out = [];
     for (let i = 0; i < s.length; i++) {
       const ch = s[i];
+      const esc = s.slice(i).match(/^\[(LF|ESC)\]/i);
+      if (esc) { out.push(esc[1].toUpperCase() === 'LF' ? 10 : 27); i += esc[0].length - 1; continue; }
       if (ch === '\\' && s[i + 1] === 'x' && /^[0-9a-fA-F]{2}$/.test(s.substr(i + 2, 2))) { out.push(parseInt(s.substr(i + 2, 2), 16)); i += 3; continue; }
       let k = LOW.indexOf(ch);
       if (ch === 'μ') k = 17; if (ch === '⊢') { out.push(127); continue; }
@@ -178,7 +180,7 @@ X=? 04 f2 14 V|X≠? 05 f2 15 V|X<? 06 f2 16 V|X>? 07 f2 17 V|X≤? 20 f2 18 V|X
 
   // ---- name normalisation for lookup ----
   const norm = s => s.toUpperCase().replace(/SIGMA/g, 'Σ').replace(/÷/g, '/').replace(/×/g, '*').replace(/↑/g, '^').replace(/↓/g, 'V')
-    .replace(/→/g, '->').replace(/←/g, '<-').replace(/≤/g, '<=').replace(/≥/g, '>=').replace(/≠|!=/g, '#').replace(/π/g, 'PI').replace(/►|▸|◆/g, '');
+    .replace(/→/g, '->').replace(/←/g, '<-').replace(/≤/g, '<=').replace(/≥/g, '>=').replace(/≠|!=/g, '#').replace(/π/g, 'PI').replace(/[►▸▶▷◆◇]/g, '');
   const LOOK = {};
   for (const n in CMDS) LOOK[norm(n)] = CMDS[n];
   const ALIAS = { 'RDN': 'R↓', 'RUP': 'R↑', 'CHS': '+/-', 'SWAP': 'X<>Y', '√X': 'SQRT', '√': 'SQRT', 'X': '×', 'STOX': 'STO×', 'RCLX': 'RCL×', 'BASEX': 'BASE×', 'ENTER^': 'ENTER', 'LSTX': 'LASTX', 'X<>F': 'X<>F', '1/X': '1/X', 'X^2': 'X↑2', 'SQ': 'X↑2', 'EXP': 'E↑X', 'ALOG': '10↑X', 'Σ+': 'Σ+', 'RV': 'R↓', 'R^': 'R↑', '.END.': 'END', 'KEYX': 'KEYX', 'KEYG': 'KEYG', 'X<>0?': 'X≠0?', 'X<>Y?': 'X≠Y?', 'X2': 'X↑2', 'X⇔Y': 'X<>Y', 'X↔Y': 'X<>Y', 'X<->Y': 'X<>Y', 'Y^X': 'Y↑X', 'E^X-1': 'E↑X-1' };
@@ -339,9 +341,9 @@ X=? 04 f2 14 V|X≠? 05 f2 15 V|X<? 06 f2 16 V|X>? 07 f2 17 V|X≤? 20 f2 18 V|X
       code += ch;
     }
     code = code.trim();
-    const m = code.match(/^(\d+)(?:\s*[▸►>◆]\s*|\s+)(\S.*)$/);
+    const m = code.match(/^(\d+)(?:\s*[▸►▶▷◆◇>•]\s*|\s+)(\S.*)$/);
     if (m) code = m[2];
-    code = code.replace(/^[▸►◆]\s*/, '');
+    code = code.replace(/^[▸►▶▷◆◇•]\s*/, '');
     return { code, comment };
   }
 

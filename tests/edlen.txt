@@ -1,0 +1,277 @@
+; EDLEN - refractive index of air, modified Edlen equation (NIST, Appendix A-IV)
+; SwissMicros DM42n / Free42
+; Menu keys: p (kPa), T (deg C), RH (%), WL (nm), blank, End
+; Defaults: p=101.3 kPa, T=20 deg C, RH=35 %, WL=650 nm 
+; Local variables: P T RH WL Q FL AL N (main), S D (LBL 10), K O C B (LBL 11)
+; No numbered registers and no global variables are used.
+; Text after a semicolon is a comment; Free42 ignores it when pasting.
+; A real line feed is written [LF] in this listing.
+
+; --- Start: save the caller's state, set defaults ---
+01▶LBL "EDLEN"            ; Program start
+02 FUNC 01                ; 0 inputs, 1 output (n): own fresh stack, the caller's stack and LASTx return at the final RTN
+03 RCLFLAG                ; All 100 flags as one complex number into X
+04 LSTO "FL"              ; FL = saved flags, flags 36-41 (display format) are restored from it at End
+05 LXASTO "AL"            ; AL = the whole Alpha register as a string, put back at End
+06 650                    ; Default wavelength
+07 LSTO "WL"              ; WL = vacuum wavelength in nm
+08 101.325                ; Default air pressure
+09 LSTO "P"               ; P = air pressure in kPa
+10 20                     ; Default temperature
+11 LSTO "T"               ; T = air temperature in deg C
+12 35                     ; Default relative humidity
+13 LSTO "RH"              ; RH = relative humidity in %
+14 0
+15 LSTO "Q"               ; Q = quit flag, 0 while running, key 6 sets it to 1
+
+; --- Main loop: build the menu, compute n, show the inputs, wait for a key ---
+16▶LBL 00                 ; Entry for every redisplay (start, after each input, after R/S)
+17 CLMENU                 ; Remove the old menu key definitions
+18 CLA                    ; Empty Alpha, so the next key gets a blank label
+19 KEY 5 XEQ 05           ; Key 5: blank, only redisplays (an undefined key would clear the message)
+20 "p"                    ; Label for key 1
+21 KEY 1 XEQ 02           ; Key 1: enter air pressure
+22 "T"                    ; Label for key 2
+23 KEY 2 XEQ 03           ; Key 2: enter temperature
+24 "RH"                   ; Label for key 3
+25 KEY 3 XEQ 04           ; Key 3: enter relative humidity
+26 "WL"                   ; Label for key 4 (lambda is not in the DM42 character set)
+27 KEY 4 XEQ 01           ; Key 4: enter wavelength
+28 "End"                  ; Label for key 6
+29 KEY 6 XEQ 06           ; Key 6: leave the program
+30 XEQ 10                 ; Compute the refractive index n into X
+31 LSTO "N"               ; N = n, parked while the stack is cleared
+32 CLST                   ; Empty the stack (4-level mode: four zeros)
+33 RCL "N"                ; n is now the only value on the stack
+34 FIX 02                 ; FIX 02 format for pressure to avoid too long numbers for ARCL   
+35 "p="                   ; Alpha line 1 starts
+36 ARCL "P"               ; ... pressure
+37 ├"kPa T="              ; ... unit, and next label
+38 ALL                    ; ALL format, so ARCL appends the inputs without trailing zeros
+39 ARCL "T"               ; ... temperature
+40 ├"°C[LF]RH="           ; ... unit, line feed (second display line), next label
+41 ARCL "RH"              ; ... humidity
+42 ├"% WL="               ; ... unit, Alpha is complete
+43 ARCL "WL"              ; ... wavelength
+44 ├"nm"                  ; ... unit and next label
+45 FIX 09                 ; FIX 9: n is shown to 1E-9 in x
+46 MENU                   ; Activate the programmable menu
+47 PROMPT                 ; Show the two Alpha lines and stop, a menu key runs its routine and returns here
+48 RCL "Q"                ; Back from a key routine or R/S: quit flag
+49 X≠0?                   ; End pressed?
+50 GTO 99                 ; Then restore and leave
+51 GTO 00                 ; Otherwise redisplay with the current values
+
+; --- Input routines (keys 1-4); each returns to the line after PROMPT ---
+52▶LBL 01                 ; Entry from key 1
+53 EXITALL                ; Hide the menu while the prompt waits for a number
+54 CLST                   ; Empty the stack
+55 RCL "WL"               ; Current wavelength in X: R/S alone keeps it
+56 "Wavelength "          ; Prompt text, split because a program string holds at most 15 characters
+57 ├"in nm?"              ; ... rest of the prompt text
+58 PROMPT                 ; Show the prompt and stop for the number
+59 STO "WL"               ; R/S: store the new (or kept) wavelength
+60 RTN                    ; Back to the main loop
+61▶LBL 02                 ; Entry from key 2
+62 EXITALL                ; Hide the menu
+63 CLST                   ; Empty the stack
+64 RCL "P"                ; Current pressure in X
+65 "Air pressure "        ; Prompt text, first part
+66 ├"in kPa?"             ; ... second part
+67 PROMPT                 ; Stop for the number
+68 STO "P"                ; Store the new pressure
+69 RTN                    ; Back to the main loop
+70▶LBL 03                 ; Entry from key 3
+71 EXITALL                ; Hide the menu
+72 CLST                   ; Empty the stack
+73 RCL "T"                ; Current temperature in X
+74 "Temperature "         ; Prompt text, first part
+75 ├"in °C?"              ; ... second part
+76 PROMPT                 ; Stop for the number
+77 STO "T"                ; Store the new temperature
+78 RTN                    ; Back to the main loop
+79▶LBL 04                 ; Entry from key 4
+80 EXITALL                ; Hide the menu
+81 CLST                   ; Empty the stack
+82 RCL "RH"               ; Current humidity in X
+83 "RH in %?"             ; Prompt text (fits in one string)
+84 PROMPT                 ; Stop for the number
+85 STO "RH"               ; Store the new humidity
+86 RTN                    ; Back to the main loop
+87▶LBL 06                 ; Entry from key 6 (End)
+88 1
+89 STO "Q"                ; Q = 1: the main loop will leave via LBL 99
+90 LBL 05                 ; Entry from key 5: nothing to do
+91 RTN                    ; Back to the main loop
+
+; --- n by the modified Edlen equation (NIST A-IV, eqs. A45-A49); result in X ---
+92▶LBL 10                 ; Called from the main loop
+93 1000
+94 RCL "WL"
+95 ÷                      ; 1000/WL = vacuum wavenumber in 1/um
+96 X↑2                    ; S = 1/lambda^2 in um^-2
+97 LSTO "S"               ; S, local to this routine
+98 130
+99 X<>Y
+100 -                     ; 130 - S
+101 2406147
+102 X<>Y
+103 ÷                     ; 2406147/(130 - S)
+104 38.9
+105 RCL- "S"              ; 38.9 - S
+106 15998
+107 X<>Y
+108 ÷                     ; 15998/(38.9 - S)
+109 +                     ; Sum of the two dispersion terms
+110 8342.54
+111 +                     ; (ns - 1) x 1E8, ns = index of standard air (A45)
+112 RCL× "P"              ; times P in kPa
+113 96095.43
+114 ÷                     ; divided by D = 96095.43
+115 0.00001
+116 ×                     ; x 1E-5 (1E-8 for ns-1 times 1000 Pa/kPa): p(ns-1)/D with p in Pa
+117 RCL "T"
+118 0.00972
+119 ×                     ; F x t
+120 0.601
+121 X<>Y
+122 -                     ; E - F t
+123 RCL× "P"              ; times P in kPa
+124 0.00001
+125 ×                     ; 1E-8 (E - F t) p with p in Pa
+126 1
+127 +                     ; Numerator of the X factor (A46): 1 + 1E-8 (E - F t) p
+128 RCL "T"
+129 0.003661
+130 ×                     ; G x t
+131 1
+132 +                     ; Denominator: 1 + G t
+133 ÷                     ; X factor (A46)
+134 ×                     ; ntp - 1 for dry air at t and p (A47)
+135 LSTO "D"              ; D = dry-air part, parked while pv is computed
+136 XEQ 11                ; Water vapour partial pressure pv in Pa into X
+137 3.7345
+138 RCL "S"
+139 0.0401
+140 ×                     ; 0.0401 S
+141 -                     ; 3.7345 - 0.0401 S
+142 ×                     ; times pv
+143 292.75
+144 ×
+145 RCL "T"
+146 273.15
+147 +                     ; Absolute temperature in K
+148 ÷                     ; times 292.75/T
+149 10000000000
+150 ÷                     ; x 1E-10: water vapour correction (A48)
+151 RCL "D"               ; Dry-air part
+152 X<>Y
+153 -                     ; minus the water vapour correction
+154 1
+155 +                     ; n = ntp - correction (A49)
+156 RTN                   ; Back to the main loop with n in X
+
+; --- pv = RH/100 x psv(t) in Pa (NIST A-I); psv over water for t >= 0, over ice for t < 0 ---
+157▶LBL 11                ; Called from LBL 10
+158 RCL "T"
+159 X<0?                  ; Below 0 deg C?
+160 GTO 12                ; Then use the ice formula
+161 273.15                ; Over water (IAPWS, eqs. A1-A7)
+162 +                     ; T in K
+163 LSTO "K"              ; K = T in K, local
+164 650.175348448         ; K10
+165 -                     ; T - K10
+166 0.238555575678        ; -K9
+167 X<>Y
+168 ÷                     ; -K9/(T - K10)
+169 RCL "K"
+170 X<>Y
+171 -                     ; Omega = T + K9/(T - K10)
+172 LSTO "O"              ; O = Omega, local
+173 1167.05214528         ; K1
+174 +                     ; Omega + K1
+175 RCL× "O"              ; (Omega + K1) Omega
+176 724213.167032         ; -K2
+177 -                     ; A = Omega^2 + K1 Omega + K2
+178 RCL "O"
+179 14.9151086135         ; K6
+190 ×                     ; K6 Omega
+181 4823.26573616         ; -K7
+182 -                     ; K6 Omega + K7
+183 RCL× "O"
+184 405113.405421         ; K8
+185 +                     ; C = K6 Omega^2 + K7 Omega + K8
+186 LSTO "C"              ; C, local
+187 ×                     ; A C
+188 4
+189 ×                     ; 4 A C
+190 12020.8247025         ; K4
+191 RCL "O"
+192 17.0738469401         ; -K3
+193 ×
+194 -                     ; K3 Omega + K4
+195 RCL× "O"
+196 3232555.03223         ; -K5
+197 -                     ; B = K3 Omega^2 + K4 Omega + K5
+198 LSTO "B"              ; B, local
+199 X↑2                   ; B^2
+200 X<>Y
+201 -                     ; B^2 - 4 A C
+203 SQRT
+203 RCL- "B"              ; X = -B + sqrt(B^2 - 4 A C)
+204 RCL "C"
+205 X<>Y
+206 ÷                     ; C/X
+207 2
+208 ×                     ; 2C/X
+209 X↑2
+210 X↑2                   ; (2C/X)^4
+211 1000000
+212 ×                     ; psv over water in Pa (A7)
+213 GTO 13                ; On to the humidity
+214▶LBL 12                ; Over ice (eqs. A8-A13), X = t
+215 273.15
+216 +                     ; T in K
+217 273.16
+218 ÷                     ; theta = T/273.16
+219 LSTO "O"              ; O = theta, local
+220 1.5
+221 Y↑X
+222 1/X                   ; theta^-1.5
+223 1
+224 X<>Y
+225 -                     ; 1 - theta^-1.5
+226 13.928169             ; -A1
+227 ×                     ; -A1 (1 - theta^-1.5)
+228 RCL "O"
+229 1.25
+230 Y↑X
+231 1/X                   ; theta^-1.25
+232 1
+233 X<>Y
+234 -                     ; 1 - theta^-1.25
+235 34.7078238            ; A2
+236 ×                     ; A2 (1 - theta^-1.25)
+237 X<>Y
+238 -                     ; Y = A1 (1 - theta^-1.5) + A2 (1 - theta^-1.25)
+239 E↑X
+240 611.657
+241 ×                     ; psv over ice in Pa
+242▶LBL 13                ; Common end, X = psv
+243 RCL× "RH"
+244 100
+245 ÷                     ; pv = RH/100 x psv
+246 RTN                   ; Back to LBL 10 with pv in X
+
+; --- End: restore the caller's settings and leave ---
+247▶LBL 99                ; Reached from the main loop when Q = 1
+248 RCL "FL"              ; Saved flags (complex number) into Y ...
+249 36.41                 ; ... range bb.ee = flags 36 to 41 in X
+250 STOFLAG               ; Restore the display format (FIX/SCI/ENG/ALL and digits)
+251 CLMENU                ; Remove the menu key definitions
+252 EXITALL               ; Leave the menu
+253 CLA
+254 ARCL "AL"             ; Alpha as it was before the start
+255 RCL "N"               ; Bring the refractive index into stack X
+256 RTN                   ; Program ends, FUNC 01 brings back the stack and LASTx, locals are deleted
+257 END
