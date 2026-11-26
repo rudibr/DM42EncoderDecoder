@@ -3,6 +3,10 @@
 A single-file, in-browser encoder/decoder for SwissMicros DM42 / Free42 / HP-42S programs.
 Open `DM42EncoderDecoder.html` in any browser. It runs entirely offline, with no server.
 
+![Typing and encoding a program, opening a .raw file, decoding pasted hex and saving a .raw](docs/demo.gif)
+
+The demo types a short program and encodes it, opens `DPLOT.raw`, pastes hex and decodes it, then saves a `.raw` file.
+
 - **Left:** program listing with line numbers, starting `0000 { n-Byte Prgm }`.
 - **Right:** the raw bytes as hex, one line per instruction.
 - **Encode →** turns the listing into raw bytes and renumbers it. **← Decode** turns hex back into a listing.
