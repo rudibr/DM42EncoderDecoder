@@ -33,6 +33,10 @@ main{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:14px;
 .ph{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--dim)}
 .ph strong{color:var(--ink);font-weight:600;font-size:14px}
 .ph button{min-height:32px;padding:0 10px;font-size:13px}
+.ph{flex-wrap:wrap}.ph>span:not(.opts){flex:1}.opts{order:3;flex-basis:100%;display:flex;flex-wrap:wrap;gap:0 18px;margin-top:-2px}.opts .chk{min-height:28px}
+input[type=checkbox]{accent-color:var(--acc);width:15px;height:15px}
+.ro{color:var(--acc)}
+textarea[readonly]{background:#101213;cursor:default}
 textarea{width:100%;height:min(66vh,640px);min-height:320px;resize:vertical;border:0;margin:0;padding:12px 14px;background:var(--pane);color:var(--ink);font:14px/1.55 "JetBrains Mono",ui-monospace,monospace;tab-size:4;white-space:pre;overflow:auto}
 textarea::placeholder{color:#5d6266}
 textarea.drag{outline:2px dashed var(--acc);outline-offset:-6px}
@@ -65,11 +69,11 @@ textarea.drag{outline:2px dashed var(--acc);outline-offset:-6px}
 </div>
 <main>
   <section class="pane">
-    <div class="ph"><strong>Program listing</strong><span id="lcount"></span><button data-copy="src">Copy</button></div>
+    <div class="ph"><strong>Program listing</strong><span id="lcount"></span><span class="opts"><label class="chk"><input type="checkbox" id="srcHideC"> Hide comments</label><label class="chk"><input type="checkbox" id="srcHideN"> Hide line numbers</label></span><button data-copy="src">Copy</button></div>
     <textarea id="src" spellcheck="false" placeholder="0000 { 0-Byte Prgm }&#10;0001 LBL &quot;HELLO&quot;   ' comments start with ' or ;&#10;0002 &quot;Hello world&quot;&#10;0003 AVIEW&#10;0004 END&#10;&#10;Drop a .raw or .txt file here"></textarea>
   </section>
   <section class="pane">
-    <div class="ph"><strong>RAW bytes (hex)</strong><span id="hcount"></span><button data-copy="hex">Copy</button></div>
+    <div class="ph"><strong>RAW bytes (hex)</strong><span id="hcount"></span><span class="opts"><label class="chk"><input type="checkbox" id="hexHideC"> Hide comments</label><label class="chk"><input type="checkbox" id="hexHideN"> Hide line numbers</label></span><button data-copy="hex">Copy</button></div>
     <textarea id="hex" spellcheck="false" placeholder="Hex appears here after Encode. You can also paste hex and press Decode."></textarea>
   </section>
 </main>
@@ -85,6 +89,7 @@ textarea.drag{outline:2px dashed var(--acc);outline-offset:-6px}
     <div>ASCII is accepted: <code>/ * ^ -&gt; &lt;= &gt;= != RDN CHS SIGMA+</code>. Free42 extensions such as <code>FUNC</code>, <code>LSTO</code>, <code>X=?</code>, <code>XSTR</code> are supported.</div>
     <div>Unknown bytes decode as <code>XROM mm,ff</code> or <code>HEX F2 …</code>, and those lines encode back to the same bytes.</div>
     <div>Several programs: each one ends with <code>END</code>. A missing final <code>END</code> is added for you.</div>
+    <div><b>Hide comments</b> / <b>Hide line numbers</b> only change what a pane shows; encoding always uses the full text. A pane is read-only while hiding. Copy and Save .txt take what is shown.</div>
   </div>
 </section>
 <script>
@@ -479,7 +484,43 @@ X=? 04 f2 14 V|X≠? 05 f2 15 V|X<? 06 f2 16 V|X>? 07 f2 17 V|X≤? 20 f2 18 V|X
     }
     return Uint8Array.from(out);
   }
-  return { encode, decode, format, listing, hexListing, parseHex, hexs, encodeLine };
+  // ---- display views (hide comments / line numbers); never used for encoding ----
+  const NUMPFX = /^\d+(?:\s*[▸►▶▷◆◇>•]\s*|\s+)(?=\S)/;
+  function tidy(out) {
+    const res = [];
+    for (const l of out) if (l !== '' || (res.length && res[res.length - 1] !== '')) res.push(l);
+    while (res.length && res[res.length - 1] === '') res.pop();
+    return res.join('\n');
+  }
+  function viewListing(text, hideC, hideN) {
+    if (!hideC && !hideN) return text;
+    const out = [];
+    for (const raw of text.replace(/\r/g, '').split('\n')) {
+      let cut = raw.length, inStr = false;
+      for (let i = 0; i < raw.length; i++) {
+        const ch = raw[i];
+        if (ch === '"') { if (!inStr) inStr = true; else if (i + 1 >= raw.length || /[\s';]/.test(raw[i + 1])) inStr = false; }
+        if ((ch === "'" || ch === ';') && !inStr) { cut = i; break; }
+      }
+      let code = raw.slice(0, cut).trim(); const comment = cut < raw.length ? raw.slice(cut).trimEnd() : '';
+      if (!code) { if (comment && !hideC) out.push(comment); else if (!comment) out.push(''); continue; }
+      if (hideN) code = code.replace(NUMPFX, '');
+      if (hideC || !comment) out.push(code);
+      else { const w = hideN ? 17 : 22; out.push((code.length < w ? code.padEnd(w) : code + '  ') + comment); }
+    }
+    return tidy(out);
+  }
+  function viewHex(text, hideC, hideN) {
+    if (!hideC && !hideN) return text;
+    const out = [];
+    for (let l of text.replace(/\r/g, '').split('\n')) {
+      if (hideC) { if (/^\s*;/.test(l)) continue; l = l.replace(/\s*;.*$/, ''); }
+      if (hideN) l = l.replace(/^\s*\d+\s*:\s*/, '');
+      out.push(l.trimEnd());
+    }
+    return tidy(out);
+  }
+  return { encode, decode, format, listing, hexListing, parseHex, hexs, encodeLine, viewListing, viewHex };
 })();
 
 
@@ -489,13 +530,26 @@ X=? 04 f2 14 V|X≠? 05 f2 15 V|X<? 06 f2 16 V|X>? 07 f2 17 V|X≤? 20 f2 18 V|X
 const $ = id => document.getElementById(id);
 const src = $('src'), hex = $('hex'), status = $('status');
 let lastBytes = null, lastName = 'PROGRAM';
+// Full text of both panes. The textareas may show a filtered view (comments / line numbers hidden).
+const full = { src: '', hex: '' };
+const hides = ['srcHideC', 'srcHideN', 'hexHideC', 'hexHideN'];
+const hidden = side => $(side + 'HideC').checked || $(side + 'HideN').checked;
+function render(keepCaret) {
+  const pos = src.selectionStart;
+  src.value = DM42.viewListing(full.src, $('srcHideC').checked, $('srcHideN').checked);
+  hex.value = DM42.viewHex(full.hex, $('hexHideC').checked, $('hexHideN').checked);
+  src.readOnly = hidden('src'); hex.readOnly = hidden('hex');
+  if (keepCaret) src.selectionStart = src.selectionEnd = Math.min(pos, src.value.length);
+  counts();
+}
+function setSrc(t) { full.src = t; try { localStorage.setItem('dm42src', t); } catch {} }
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function say(html) { status.innerHTML = html; }
 function counts() {
   const n = src.value.split('\n').filter(l => l.trim()).length;
-  $('lcount').textContent = n ? n + ' lines' : '';
-  $('hcount').textContent = lastBytes ? lastBytes.length + ' bytes in file' : '';
+  $('lcount').innerHTML = (n ? n + ' lines' : '') + (src.readOnly ? ' · <span class="ro">read-only while hiding</span>' : '');
+  $('hcount').innerHTML = (lastBytes ? lastBytes.length + ' bytes in file' : '') + (hex.readOnly ? ' · <span class="ro">read-only while hiding</span>' : '');
 }
 function nameFrom(progs) {
   for (const p of progs) for (const l of (p.lines || [])) {
@@ -509,17 +563,14 @@ function summary(progs) {
 }
 
 function doEncode() {
-  const e = DM42.encode(src.value);
+  const e = DM42.encode(full.src);
   if (!e.progs.length && !e.errors.length) { say('<span class="err">Nothing to encode.</span>'); return; }
   lastBytes = e.bytes;
   const dec = DM42.decode(e.bytes);
-  hex.value = DM42.hexListing(dec);
+  full.hex = DM42.hexListing(dec);
   lastName = nameFrom(dec);
-  if ($('renum').checked) {
-    const pos = src.selectionStart;
-    src.value = DM42.format(e);
-    src.selectionStart = src.selectionEnd = Math.min(pos, src.value.length);
-  }
+  if ($('renum').checked) setSrc(DM42.format(e));
+  render(true);
   if (e.errors.length) {
     say(`<span class="err">${e.errors.length} line${e.errors.length > 1 ? 's' : ''} not encoded:</span><br>` +
       e.errors.map(x => `<a data-src="${esc(x.src)}">${esc(x.src)}</a> — ${esc(x.msg)}`).join('<br>'));
@@ -530,15 +581,16 @@ function showDecoded(bytes, from) {
   if (!bytes.length) { say('<span class="err">No bytes found.</span>'); return; }
   lastBytes = bytes;
   const progs = DM42.decode(bytes);
-  src.value = DM42.listing(progs);
-  hex.value = DM42.hexListing(progs);
+  setSrc(DM42.listing(progs));
+  full.hex = DM42.hexListing(progs);
+  render();
   lastName = nameFrom(progs);
   const unk = progs.reduce((n, p) => n + p.lines.filter(l => l.text.startsWith('HEX ')).length, 0);
   say(`<span class="ok">Decoded ${progs.length} program${progs.length > 1 ? 's' : ''} from ${esc(from)} (${bytes.length} bytes).</span> ${summary(progs)}` +
     (unk ? ` <span class="err">${unk} unrecognised instruction${unk > 1 ? 's' : ''} kept as HEX lines.</span>` : ''));
   counts();
 }
-function doDecode() { showDecoded(DM42.parseHex(hex.value), 'hex'); }
+function doDecode() { showDecoded(DM42.parseHex(full.hex), 'hex'); }
 
 status.addEventListener('click', ev => {
   const a = ev.target.closest('a[data-src]'); if (!a) return;
@@ -552,7 +604,7 @@ async function loadFile(f) {
   const buf = new Uint8Array(await f.arrayBuffer());
   const textLike = /\.(txt|42s|free42|hp42s|lst)$/i.test(f.name) ||
     (!/\.raw$/i.test(f.name) && !buf.some(b => b < 9 || (b > 13 && b < 32)));
-  if (textLike) { src.value = new TextDecoder().decode(buf); doEncode(); say(status.innerHTML.replace('Encoded', 'Loaded ' + esc(f.name) + ' and encoded')); }
+  if (textLike) { setSrc(new TextDecoder().decode(buf)); render(); doEncode(); say(status.innerHTML.replace('Encoded', 'Loaded ' + esc(f.name) + ' and encoded')); }
   else showDecoded(buf, f.name);
 }
 $('file').addEventListener('change', e => { loadFile(e.target.files[0]); e.target.value = ''; });
@@ -617,10 +669,16 @@ document.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click'
 
 $('enc').addEventListener('click', doEncode);
 $('dec').addEventListener('click', doDecode);
-$('clear').addEventListener('click', () => { src.value = hex.value = ''; lastBytes = null; say('<span class="ok">Cleared.</span>'); counts(); try { localStorage.removeItem('dm42src'); } catch {} });
+$('clear').addEventListener('click', () => { full.src = full.hex = ''; lastBytes = null; render(); say('<span class="ok">Cleared.</span>'); try { localStorage.removeItem('dm42src'); } catch {} });
 src.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); doEncode(); } });
 hex.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); doDecode(); } });
-src.addEventListener('input', () => { counts(); try { localStorage.setItem('dm42src', src.value); } catch {} });
+src.addEventListener('input', () => { if (!src.readOnly) setSrc(src.value); counts(); });
+hex.addEventListener('input', () => { if (!hex.readOnly) full.hex = hex.value; });
+for (const id of hides) {
+  try { $(id).checked = localStorage.getItem('dm42' + id) === '1'; } catch {}
+  $(id).addEventListener('change', () => { try { localStorage.setItem('dm42' + id, $(id).checked ? '1' : '0'); } catch {} render(); });
+}
+for (const t of [src, hex]) t.addEventListener('beforeinput', () => { if (t.readOnly) say('<span class="err">This pane is read-only while comments or line numbers are hidden.</span> Untick the boxes to edit.'); });
 
 const SAMPLE = `' Example: quadratic solver  a·x² + b·x + c = 0
 LBL "QUAD"          ' global label
@@ -657,10 +715,10 @@ RCL÷ 02
 ARCL ST X
 AVIEW
 END`;
-$('sample').addEventListener('click', () => { src.value = SAMPLE; doEncode(); });
+$('sample').addEventListener('click', () => { setSrc(SAMPLE); doEncode(); });
 
 let saved = null; try { saved = localStorage.getItem('dm42src'); } catch {}
-src.value = saved || SAMPLE; doEncode();
+setSrc(saved || SAMPLE); doEncode();
 }
 </script>
 </body>

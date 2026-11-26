@@ -52,5 +52,17 @@ check(D.hexs(D.encodeLine('├"°C[LF]RH="').bytes) === 'F7 7F 13 43 0A 52 48 3D
 check(D.hexs(D.encode(D.listing(D.decode(ed.bytes))).bytes) === D.hexs(ed.bytes), 'EDLEN encode → decode → encode is stable');
 check(D.hexs(D.encodeLine('LBL "A▶"').bytes) === 'C0 00 F3 00 41 06', '▶ inside a string is still a character');
 
+// 6. Hide comments / line numbers (display only).
+const lst = `0000 { 10-Byte Prgm }\n; header comment\n0001 LBL "T"           ' entry\n0002 "A;B"            ; text keeps its ;\n0003 12\n0004 END`;
+check(D.viewListing(lst, true, false) === `0000 { 10-Byte Prgm }\n0001 LBL "T"\n0002 "A;B"\n0003 12\n0004 END`, 'listing: hide comments');
+check(D.viewListing(lst, false, true) === `{ 10-Byte Prgm }\n; header comment\nLBL "T"          ' entry\n"A;B"            ; text keeps its ;\n12\nEND`, 'listing: hide line numbers');
+check(D.viewListing(lst, true, true) === `{ 10-Byte Prgm }\nLBL "T"\n"A;B"\n12\nEND`, 'listing: hide both');
+check(D.viewListing(lst, false, false) === lst, 'listing: nothing hidden is unchanged');
+check(D.hexs(D.encode(D.viewListing(lst, true, true)).bytes) === D.hexs(D.encode(lst).bytes), 'a cleaned listing encodes to the same bytes');
+const hx = D.hexListing(D.decode(D.encode(lst).bytes));
+check(D.viewHex(hx, true, true) === 'C0 00 F2 00 54\nF3 41 3B 42\n11 12 00\nC0 00 0D', 'hex: hide both');
+check(D.viewHex(hx, true, false).startsWith('0001: C0 00') && D.viewHex(hx, false, true).startsWith('; {'), 'hex: hide one at a time');
+check(D.hexs(D.parseHex(D.viewHex(hx, true, true))) === D.hexs(D.encode(lst).bytes), 'cleaned hex still decodes');
+
 console.log(fails ? `\n${fails} FAILED` : '\nAll tests passed');
 process.exit(fails ? 1 : 0);
