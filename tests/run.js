@@ -97,10 +97,15 @@ for (const [src, hx] of p42) {
   check(got === hx && dec.plus42 && dec[0].lines[0].text === src, `Plus42: ${src} → ${got}`);
 }
 check(D.hexs(D.encodeLine('"↑"').bytes) === 'F1 5E' && D.hexs(D.encodeLine('"↑"', P).bytes) === 'F1 1E', '↑ is 5E in DM42 mode, 1E in Plus42 mode');
-const pm = D.encode(`'A*B' ; equation, then a comment\nSTO 01 @ note\n' a DM42 comment`, P);
-check(pm.errors.length === 1 && pm.errors[0].line === 3 && pm.progs[0].lines.map(l => l.text).join('|') === "'A*B'|STO 01|END", "Plus42 mode: ' starts an equation, ; and @ are comments, a ' comment line is an error");
+const pm = D.encode(`' a comment line\n0001 'A*B' ' equation, then a comment\nEVAL 'C+D'\nLBL "QUAD"   ' global label\nSTO 01 @ note\nRCL 02 ; note\n'x' and more`, P);
+check(!pm.errors.length && pm.progs[0].lines.map(l => l.text).join('|') === "'A*B'|EVAL 'C+D'|LBL \"QUAD\"|STO 01|RCL 02|END", "Plus42 mode: ' comments work as in DM42 mode; 'EQ' as an instruction is an equation");
 check(D.encode("'A*B'").progs.length === 0 && /Plus42 mode/.test(D.encode('`A*B`').errors[0].msg) && /Plus42 mode/.test(D.encode('12_km').errors[0].msg), 'DM42 mode: \' is a comment, ` and unit literals ask for Plus42 mode');
 check(!D.decode(D.encode('LBL "A"\n"x↑"').bytes).plus42, 'plain DM42 programs are not flagged as Plus42');
+
+// 9. The built-in example must encode cleanly in both modes, and ' errors in Plus42 mode explain why.
+const sample = fs.readFileSync(path.join(__dirname, '..', 'DM42EncoderDecoder.html'), 'utf8').match(/const SAMPLE = `([\s\S]*?)`;/)[1];
+for (const m of [false, true]) { const r = D.encode(sample, { plus42: m }); check(!r.errors.length && r.progs[0].size === 78, `example QUAD encodes, 78 bytes (${m ? 'Plus42' : 'DM42'} mode)`); }
+check(!D.encode(`LBL "Q" ' note`, { plus42: true }).errors.length, "Plus42 mode: ' comment after an instruction");
 
 console.log(fails ? `\n${fails} FAILED` : '\nAll tests passed');
 process.exit(fails ? 1 : 0);

@@ -36,6 +36,8 @@ main{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:14px;
 .ph{flex-wrap:wrap}.ph>span:not(.opts){flex:1}.opts{order:3;flex-basis:100%;display:flex;flex-wrap:wrap;gap:0 18px;margin-top:-2px}.opts .chk{min-height:28px}
 input[type=checkbox]{accent-color:var(--acc);width:15px;height:15px}
 .ro{color:var(--acc)}
+#modeTag{font:600 12px "Inter Tight",sans-serif;padding:3px 8px;border-radius:5px;background:#2a2e32;color:var(--dim)}
+#modeTag.on{background:#3a2a12;color:var(--acc)}
 textarea[readonly]{background:#101213;cursor:default}
 textarea{width:100%;height:min(66vh,640px);min-height:320px;resize:vertical;border:0;margin:0;padding:12px 14px;background:var(--pane);color:var(--ink);font:14px/1.55 "JetBrains Mono",ui-monospace,monospace;tab-size:4;white-space:pre;overflow:auto}
 textarea::placeholder{color:#5d6266}
@@ -61,7 +63,8 @@ textarea.drag{outline:2px dashed var(--acc);outline-offset:-6px}
   <button class="pri" id="enc" title="Ctrl+Enter">Encode →</button>
   <button class="pri" id="dec">← Decode</button>
   <label class="chk"><input type="checkbox" id="renum" checked> Renumber listing on encode</label>
-  <label class="chk" title="Plus42 listings: ↑ in strings is byte 1E, 'A*B' and `A*B` are equations, 12_km is a unit value, comments use ; or @"><input type="checkbox" id="p42"> Plus42 mode</label>
+  <label class="chk" title="Plus42 listings: ↑ in strings is byte 1E, 'A*B' and `A*B` as an instruction are equations, 12_km is a unit value. Off by default."><input type="checkbox" id="p42"> Plus42 mode</label>
+  <span id="modeTag" aria-live="polite">DM42</span>
   <span class="sep"></span>
   <button id="saveRaw">Save .raw</button>
   <button id="saveTxt">Save .txt</button>
@@ -90,7 +93,7 @@ textarea.drag{outline:2px dashed var(--acc);outline-offset:-6px}
     <div>Numbers: <code>1.5ᴇ-3</code> or <code>1.5E-3</code>, <code>ᴇ3</code>, comma decimals <code>14,1041</code>. Synthetic registers 100–127 (<code>RCL 122</code>) are accepted.</div>
     <div>ASCII is accepted: <code>/ * ^ -&gt; &lt;= &gt;= != RDN CHS SIGMA+</code>. Free42 extensions such as <code>FUNC</code>, <code>LSTO</code>, <code>X=?</code>, <code>XSTR</code> are supported, and Plus42's named instructions too.</div>
     <div>Unknown bytes decode as <code>XROM mm,ff</code> or <code>HEX F2 …</code>, and those lines encode back to the same bytes.</div>
-    <div><b>Plus42 mode</b>: <code>↑</code> in strings is byte 1E, <code>'A*B'</code>, <code>`A*B`</code> and <code>EVAL 'A*B'</code> are equations, <code>12_km</code> is a unit value, and comments use <code>;</code> or <code>@</code>. It turns on by itself when a decoded file needs it.</div>
+    <div><b>Plus42 mode</b>: <code>↑</code> in strings is byte 1E, <code>'A*B'</code>, <code>`A*B`</code> and <code>EVAL 'A*B'</code> are equations, and <code>12_km</code> is a unit value. Comments with <code>'</code> <code>;</code> <code>@</code> work as usual: a <code>'</code> is an equation only when it is the whole instruction. Off by default; it turns on by itself when a decoded file needs it.</div>
     <div>Several programs: each one ends with <code>END</code>. A missing final <code>END</code> is added for you.</div>
     <div><b>Hide comments</b> / <b>Hide line numbers</b> only change what a pane shows; encoding always uses the full text. A pane is read-only while hiding. Copy and Save .txt take what is shown.</div>
   </div>
@@ -382,7 +385,15 @@ UVAL 00 a6 f3 N|XAXIS 57 f2 62 NM|XMAX 00 a7 1f N|XMIN 00 a7 1e N|YAXIS 70 f2 63
 
   // A " ends a string if followed by end of line or whitespace, or by a comment character
   // when no further " follows on the line (so "A"'B" stays one string, LBL "S";x is a comment).
-  const isCmt = ch => ch === ';' || ch === '@' || (ch === "'" && !P42);
+  const isCmt = ch => ch === ';' || ch === '@' || ch === "'";
+  // Plus42 mode: a ' starts an equation only when it is the whole instruction ('A*B' or EVAL 'A*B'):
+  // at the start of the code, not followed by a space, closed on the same line, and followed only by
+  // whitespace or a comment. Otherwise it is a comment, as in DM42 mode.
+  const eqStart = (raw, i) => {
+    if (!/^\s*(\d+\s*[▸►▶▷◆◇>•]?\s*)?(EVAL\s+)?$/i.test(raw.slice(0, i)) || !/\S/.test(raw[i + 1] || '')) return false;
+    const j = raw.indexOf("'", i + 1);
+    return j > i + 1 && /^(\s*$|\s+[';@]|[;@])/.test(raw.slice(j + 1));
+  };
   function closesStr(raw, i) {
     const n = raw[i + 1];
     if (n === undefined || /\s/.test(n)) return true;
@@ -395,7 +406,7 @@ UVAL 00 a6 f3 N|XAXIS 57 f2 62 NM|XMAX 00 a7 1f N|XMIN 00 a7 1e N|YAXIS 70 f2 63
       const ch = raw[i];
       if (q === '"') { if (ch === '"' && closesStr(raw, i)) q = null; continue; }
       if (q) { if (ch === q) q = null; continue; }
-      if (ch === '"' || (P42 && (ch === "'" || ch === '`'))) { q = ch; continue; }
+      if (ch === '"' || (P42 && (ch === '`' || (ch === "'" && eqStart(raw, i))))) { q = ch; continue; }
       if (isCmt(ch)) return i;
     }
     return raw.length;
@@ -426,7 +437,10 @@ UVAL 00 a6 f3 N|XAXIS 57 f2 62 NM|XMAX 00 a7 1f N|XMIN 00 a7 1e N|YAXIS 70 f2 63
         cur.lines.push(r); cur.bytes.push(...r.bytes);
         items.push({ prog: cur, r, comment });
         if (r.end) cur = null;
-      } catch (e) { errors.push({ line: i + 1, msg: String(e), src: raw.trim() }); items.push({ blank: true, comment: null, raw }); }
+      } catch (e) {
+        let msg = String(e);
+        errors.push({ line: i + 1, msg, src: raw.trim() }); items.push({ blank: true, comment: null, raw });
+      }
     });
     if (cur && cur.lines.length) { const r = { bytes: [0xc0, 0x00, 0x0d], text: 'END', end: true, auto: true }; cur.lines.push(r); cur.bytes.push(...r.bytes); items.push({ prog: cur, r, comment: null }); }
     for (const p of progs) p.size = p.bytes.length - 3;
@@ -612,6 +626,7 @@ let lastBytes = null, lastName = 'PROGRAM';
 const full = { src: '', hex: '' };
 const hides = ['srcHideC', 'srcHideN', 'hexHideC', 'hexHideN'];
 const mode = () => ({ plus42: $('p42').checked });
+function showMode() { const on = $('p42').checked; $('modeTag').textContent = on ? 'Plus42 syntax' : 'DM42 syntax'; $('modeTag').className = on ? 'on' : ''; }
 const hidden = side => $(side + 'HideC').checked || $(side + 'HideN').checked;
 function render(keepCaret) {
   const pos = src.selectionStart;
@@ -661,7 +676,7 @@ function showDecoded(bytes, from) {
   lastBytes = bytes;
   let progs = DM42.decode(bytes, mode()), switched = false;
   if (progs.plus42 && !$('p42').checked) { // Plus42 literals or the Plus42 ↑ found: switch mode and decode again
-    $('p42').checked = true; switched = true; try { localStorage.setItem('dm42p42', '1'); } catch {}
+    $('p42').checked = true; switched = true; showMode();
     progs = DM42.decode(bytes, mode());
   }
   setSrc(DM42.listing(progs));
@@ -758,13 +773,13 @@ src.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key ===
 hex.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); doDecode(); } });
 src.addEventListener('input', () => { if (!src.readOnly) setSrc(src.value); counts(); });
 hex.addEventListener('input', () => { if (!hex.readOnly) full.hex = hex.value; });
-try { $('p42').checked = localStorage.getItem('dm42p42') === '1'; } catch {}
+try { localStorage.removeItem('dm42p42'); } catch {} // Plus42 mode always starts off
+showMode();
 $('p42').addEventListener('change', () => {
-  try { localStorage.setItem('dm42p42', $('p42').checked ? '1' : '0'); } catch {}
-  render();
+  render(); showMode();
   say($('p42').checked
-    ? `<span class="ok">Plus42 mode on.</span> ↑ in strings is byte 1E, 'A*B' / \`A*B\` are equations, 12_km is a unit value; comments use ; or @. Press Encode.`
-    : `<span class="ok">DM42 mode.</span> ↑ and ^ are byte 5E; ' ; @ start comments. Press Encode.`);
+    ? `<span class="ok">Plus42 mode on.</span> ↑ in strings is byte 1E; 'A*B' / \`A*B\` on a line of their own are equations; 12_km is a unit value. Comments work as usual. Press Encode.`
+    : `<span class="ok">DM42 mode.</span> ↑ and ^ are byte 5E. Press Encode.`);
 });
 for (const id of hides) {
   try { $(id).checked = localStorage.getItem('dm42' + id) === '1'; } catch {}
@@ -772,8 +787,8 @@ for (const id of hides) {
 }
 for (const t of [src, hex]) t.addEventListener('beforeinput', () => { if (t.readOnly) say('<span class="err">This pane is read-only while comments or line numbers are hidden.</span> Untick the boxes to edit.'); });
 
-const SAMPLE = `' Example: quadratic solver  a·x² + b·x + c = 0
-LBL "QUAD"          ' global label
+const SAMPLE = `; Example: quadratic solver  a·x² + b·x + c = 0
+LBL "QUAD"          ; global label
 MVAR "A"
 MVAR "B"
 MVAR "C"
@@ -788,7 +803,7 @@ X↑2
 RCL× "A"
 RCL× "C"
 -
-SQRT               ' complex result if negative (CPXRES)
+SQRT               ; complex result if negative (CPXRES)
 STO 01
 +
 2
