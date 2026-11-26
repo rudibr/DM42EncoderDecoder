@@ -31,9 +31,17 @@ The demo types a short program and encodes it, opens `DPLOT.raw`, pastes hex and
 
 It covers the full HP-42S instruction set plus the Free42/DM42 extensions (`FUNC`, `LSTO`, `L4STK`, `X=?`, `XSTR`, …).
 Plus42's named instructions (directories, units, TVM, plotting, `EQNSLV`, `GTOL`, …) are supported too, with byte codes taken from Free42's `stress.raw`.
-Plus42 equation and unit literals (`'A*B'`, `40076_km`) are not: they reference a separate equation table.
 
-Character note: in DM42/Free42 listings `↑` and `^` are both byte `5E`. Plus42 listings write `↑` for byte `1E`; type `\x1E` for that.
+### Plus42 mode
+
+Tick **Plus42 mode** for Plus42 listings. It changes three things:
+
+- `↑` in strings is byte `1E` (in DM42/Free42 listings `↑` and `^` are both byte `5E`).
+- `'A*B+C*D'`, `` `A*B+C*D` ``, `EVAL 'A*B+C*D'` are equation literals, and `40076_km` is a unit value.
+- Comments start with `;` or `@` only, because `'` now starts an equation.
+
+Decoding a `.raw` with Plus42 equations, units or the Plus42 `↑` turns the mode on automatically.
+With it, Free42's `stress` test program (every instruction, 2645 bytes) and the Plus42 programs HPFX, HPOLY and MES encode byte-identical.
 Byte codes follow Free42's `core_tables.cc` and `export_hp42s`. Numbers are terminated with `00` and END is written as `C0 00 0D`, the same as Free42.
 
 ## Tests

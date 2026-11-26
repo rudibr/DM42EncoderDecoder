@@ -61,6 +61,7 @@ textarea.drag{outline:2px dashed var(--acc);outline-offset:-6px}
   <button class="pri" id="enc" title="Ctrl+Enter">Encode →</button>
   <button class="pri" id="dec">← Decode</button>
   <label class="chk"><input type="checkbox" id="renum" checked> Renumber listing on encode</label>
+  <label class="chk" title="Plus42 listings: ↑ in strings is byte 1E, 'A*B' and `A*B` are equations, 12_km is a unit value, comments use ; or @"><input type="checkbox" id="p42"> Plus42 mode</label>
   <span class="sep"></span>
   <button id="saveRaw">Save .raw</button>
   <button id="saveTxt">Save .txt</button>
@@ -89,6 +90,7 @@ textarea.drag{outline:2px dashed var(--acc);outline-offset:-6px}
     <div>Numbers: <code>1.5ᴇ-3</code> or <code>1.5E-3</code>, <code>ᴇ3</code>, comma decimals <code>14,1041</code>. Synthetic registers 100–127 (<code>RCL 122</code>) are accepted.</div>
     <div>ASCII is accepted: <code>/ * ^ -&gt; &lt;= &gt;= != RDN CHS SIGMA+</code>. Free42 extensions such as <code>FUNC</code>, <code>LSTO</code>, <code>X=?</code>, <code>XSTR</code> are supported, and Plus42's named instructions too.</div>
     <div>Unknown bytes decode as <code>XROM mm,ff</code> or <code>HEX F2 …</code>, and those lines encode back to the same bytes.</div>
+    <div><b>Plus42 mode</b>: <code>↑</code> in strings is byte 1E, <code>'A*B'</code>, <code>`A*B`</code> and <code>EVAL 'A*B'</code> are equations, <code>12_km</code> is a unit value, and comments use <code>;</code> or <code>@</code>. It turns on by itself when a decoded file needs it.</div>
     <div>Several programs: each one ends with <code>END</code>. A missing final <code>END</code> is added for you.</div>
     <div><b>Hide comments</b> / <b>Hide line numbers</b> only change what a pane shows; encoding always uses the full text. A pane is read-only while hiding. Copy and Save .txt take what is shown.</div>
   </div>
@@ -178,9 +180,12 @@ UVAL 00 a6 f3 N|XAXIS 57 f2 62 NM|XMAX 00 a7 1f N|XMIN 00 a7 1e N|YAXIS 70 f2 63
   SC[0xae] = { c: { name: 'GTO' }, ind: true }; SC[0xaf] = { c: { name: 'XEQ' }, ind: true };
 
   // ---- HP-42S character set <-> Unicode ----
+  // Plus42 mode: ↑ in strings is byte 1E (not 5E), '…' / `…` are equation literals, 12_km is a unit
+  // literal, and only ; and @ start comments. P42 is set by encode/decode/encodeLine/viewListing.
+  let P42 = false, SAW42 = false;
   const LOW = '÷×√∫░Σ▶π¿≤␊≥≠↵↓→←µ£°ÅÑÄ∡ᴇÆ…␛ÖÜ▒•';
-  const toUni = b => b === 10 ? '[LF]' : b === 27 ? '[ESC]' : b < 32 ? LOW[b] : b === 127 ? '├' : b < 127 ? String.fromCharCode(b) : '\\x' + b.toString(16).toUpperCase().padStart(2, '0');
-  const bytesToStr = a => Array.from(a, toUni).join('');
+  const toUni = b => b === 0x1e && P42 ? '↑' : b === 10 ? '[LF]' : b === 27 ? '[ESC]' : b < 32 ? LOW[b] : b === 127 ? '├' : b < 127 ? String.fromCharCode(b) : '\\x' + b.toString(16).toUpperCase().padStart(2, '0');
+  const bytesToStr = a => { if (Array.prototype.includes.call(a, 0x1e)) SAW42 = true; return Array.from(a, toUni).join(''); };
   function strToBytes(s) {
     const out = [];
     for (let i = 0; i < s.length; i++) {
@@ -191,7 +196,7 @@ UVAL 00 a6 f3 N|XAXIS 57 f2 62 NM|XMAX 00 a7 1f N|XMIN 00 a7 1e N|YAXIS 70 f2 63
       let k = LOW.indexOf(ch);
       if (ch === 'μ') k = 17; if (ch === '⊢') { out.push(127); continue; }
       if (k >= 0) out.push(k);
-      else if (ch === '↑') out.push(94);
+      else if (ch === '↑') out.push(P42 ? 0x1e : 94);
       else if (ch === '├') out.push(127);
       else { const c = ch.charCodeAt(0); if (c > 126) throw `Character "${ch}" not in the HP-42S character set`; out.push(c); }
     }
@@ -247,11 +252,32 @@ UVAL 00 a6 f3 N|XAXIS 57 f2 62 NM|XMAX 00 a7 1f N|XMIN 00 a7 1e N|YAXIS 70 f2 63
     throw `${c.name} needs a name argument`;
   }
 
+  // text as XSTR chunks: Fn A7 49 <13 chars> … Fn A7 41 <last chars>
+  function xstrChunks(b) {
+    if (!b.length) return [0xf2, 0xa7, 0x41];
+    const out = [];
+    for (let i = 0; i < b.length; i += 13) { const ch = b.slice(i, i + 13), last = i + 13 >= b.length; out.push(0xf2 + ch.length, 0xa7, last ? 0x41 : 0x49, ...ch); }
+    return out;
+  }
   // ---- encode one instruction (text without line number/comment) ----
   const NUMRE = /^-?(\d+[.,]?\d*|[.,]\d+)?([Eᴇ]-?\d*)?$/i;
   const isNum = s => NUMRE.test(s) && /[\dEeᴇ]/.test(s);
-  function encodeLine(s) {
+  function encLine(s) {
     s = s.trim();
+    // Plus42 equation literal: 'EQ', `EQ`, EVAL 'EQ', EVAL `EQ` → F6 A7 76|7E FF FF FF FF|FE + text as XSTR chunks
+    const eq = s.match(/^(EVAL\s+)?(['`])(.*)\2$/i);
+    if (eq && (P42 || eq[2] === '`')) {
+      if (!P42) throw 'Equation literal: turn on Plus42 mode';
+      const ev = !!eq[1];
+      return { bytes: [0xf6, 0xa7, ev ? 0x7e : 0x76, 0xff, 0xff, 0xff, eq[2] === "'" ? 0xff : 0xfe, ...xstrChunks(strToBytes(eq[3]))], text: (ev ? 'EVAL ' : '') + eq[2] + eq[3] + eq[2] };
+    }
+    // Plus42 unit literal: 40076_km → A6 F7, the number, the unit as XSTR chunks
+    const un = s.match(/^([^_\s]+)_(\S+)$/);
+    if (un && isNum(un[1])) {
+      if (!P42) throw 'Unit literal: turn on Plus42 mode';
+      const n = encLine(un[1]);
+      return { bytes: [0xa6, 0xf7, ...n.bytes, ...xstrChunks(strToBytes(un[2]))], text: n.text + '_' + un[2] };
+    }
     if (/^(├|⊢|\|-)?".*"$/.test(s)) { // string literal
       const app = !s.startsWith('"');
       const txt = s.slice(s.indexOf('"') + 1, -1);
@@ -318,10 +344,7 @@ UVAL 00 a6 f3 N|XAXIS 57 f2 62 NM|XMAX 00 a7 1f N|XMIN 00 a7 1e N|YAXIS 70 f2 63
       case 'SIZE': need(); if (a.t !== 'num' || a.ind || a.v > 9999) throw 'SIZE needs 0–9999';
         return { bytes: [0xf3, 0xf7, a.v >> 8, a.v & 255], text: 'SIZE ' + a.v };
       case 'XSTR': { need(); if (a.t !== 'str' || a.ind) throw 'XSTR needs a "string"';
-        const b = strToBytes(a.v), out = [];
-        if (!b.length) return { bytes: [0xf2, 0xa7, 0x41], text: t };
-        for (let i = 0; i < b.length; i += 13) { const ch = b.slice(i, i + 13), last = i + 13 >= b.length; out.push(0xf2 + ch.length, 0xa7, last ? 0x41 : 0x49, ...ch); }
-        return { bytes: out, text: t };
+        return { bytes: xstrChunks(strToBytes(a.v)), text: t };
       }
       case 'KEYX': case 'KEYG': case 'ASSIGN': throw `Use "KEY n XEQ/GTO …" or 'ASSIGN "name" TO nn'`;
     }
@@ -359,21 +382,28 @@ UVAL 00 a6 f3 N|XAXIS 57 f2 62 NM|XMAX 00 a7 1f N|XMIN 00 a7 1e N|YAXIS 70 f2 63
 
   // A " ends a string if followed by end of line or whitespace, or by a comment character
   // when no further " follows on the line (so "A"'B" stays one string, LBL "S";x is a comment).
+  const isCmt = ch => ch === ';' || ch === '@' || (ch === "'" && !P42);
   function closesStr(raw, i) {
     const n = raw[i + 1];
     if (n === undefined || /\s/.test(n)) return true;
-    return /[';@]/.test(n) && raw.indexOf('"', i + 1) < 0;
+    return isCmt(n) && raw.indexOf('"', i + 1) < 0;
+  }
+  // where the comment starts in a raw listing line (raw.length if none), skipping quoted text
+  function commentAt(raw) {
+    let q = null;
+    for (let i = 0; i < raw.length; i++) {
+      const ch = raw[i];
+      if (q === '"') { if (ch === '"' && closesStr(raw, i)) q = null; continue; }
+      if (q) { if (ch === q) q = null; continue; }
+      if (ch === '"' || (P42 && (ch === "'" || ch === '`'))) { q = ch; continue; }
+      if (isCmt(ch)) return i;
+    }
+    return raw.length;
   }
   // ---- split a listing line into line-number / code / comment ----
   function splitLine(raw) {
-    let code = '', comment = null, inStr = false;
-    for (let i = 0; i < raw.length; i++) {
-      const ch = raw[i];
-      if (ch === '"') { if (!inStr) inStr = true; else if (closesStr(raw, i)) inStr = false; }
-      if ((ch === "'" || ch === ';' || ch === '@') && !inStr) { comment = raw.slice(i); break; }
-      code += ch;
-    }
-    code = code.trim();
+    const cut = commentAt(raw);
+    let code = raw.slice(0, cut).trim(); const comment = cut < raw.length ? raw.slice(cut) : null;
     const m = code.match(/^(\d+)(?:\s*[▸►▶▷◆◇>•]\s*|\s+)(\S.*)$/);
     if (m) code = m[2];
     code = code.replace(/^[▸►▶▷◆◇•]\s*/, '');
@@ -381,7 +411,8 @@ UVAL 00 a6 f3 N|XAXIS 57 f2 62 NM|XMAX 00 a7 1f N|XMIN 00 a7 1e N|YAXIS 70 f2 63
   }
 
   // ---- encode full listing ----
-  function encode(text) {
+  function encode(text, o = {}) {
+    P42 = !!o.plus42;
     const lines = text.replace(/\r/g, '').split('\n');
     const progs = []; let cur = null; const errors = [], items = [];
     const start = () => { cur = { lines: [], bytes: [] }; progs.push(cur); };
@@ -390,7 +421,7 @@ UVAL 00 a6 f3 N|XAXIS 57 f2 62 NM|XMAX 00 a7 1f N|XMIN 00 a7 1e N|YAXIS 70 f2 63
       if (!code) { items.push({ blank: true, comment, raw }); return; }
       if (/^\{.*Byte\s*Prgm\s*\}$/i.test(code)) { items.push({ header: true, comment }); return; }
       try {
-        const r = encodeLine(code);
+        const r = encLine(code);
         if (!cur) start();
         cur.lines.push(r); cur.bytes.push(...r.bytes);
         items.push({ prog: cur, r, comment });
@@ -433,7 +464,16 @@ UVAL 00 a6 f3 N|XAXIS 57 f2 62 NM|XMAX 00 a7 1f N|XMIN 00 a7 1e N|YAXIS 70 f2 63
     return { t: 'num', v, ind }; // synthetic register 100-127
   }
   const keyNo = kb => kb > 9 ? -(kb - 9) : kb;
-  function decode(bytes) {
+  // read XSTR chunks starting at byte j: { s: bytes, end } or null
+  function readXstr(bytes, j) {
+    const s = []; const st = j;
+    while (j < bytes.length && bytes[j] >= 0xf2 && bytes[j + 1] === 0xa7 && (bytes[j + 2] === 0x41 || bytes[j + 2] === 0x49)) {
+      const LL = bytes[j] & 15, more = bytes[j + 2] === 0x49; s.push(...bytes.slice(j + 3, j + 1 + LL)); j += 1 + LL; if (!more) return { s, end: j };
+    }
+    return null;
+  }
+  function decode(bytes, o = {}) {
+    P42 = !!o.plus42; SAW42 = false;
     const progs = []; let cur = null, i = 0;
     const emit = (text, len, isEnd) => {
       if (!cur) { cur = { lines: [], size: 0 }; progs.push(cur); }
@@ -460,6 +500,13 @@ UVAL 00 a6 f3 N|XAXIS 57 f2 62 NM|XMAX 00 a7 1f N|XMIN 00 a7 1e N|YAXIS 70 f2 63
       if (ONE[b]) { emit(ONE[b].name, 1); continue; }
       if (POST[b] && b !== 0xae) { const a = sfx(n1, false); if (!a) { raw(2); continue; } emit(`${POST[b].name} ${fmtArg(a, argW(POST[b]))}`, 2); continue; }
       if (b === 0xae) { const x = n1 & 0x80; const a = sfx(n1 & 0x7f, false); if (!a) { raw(2); continue; } a.ind = true; emit(`${x ? 'XEQ' : 'GTO'} ${fmtArg(a, 2)}`, 2); continue; }
+      if (b === 0xa6 && n1 === 0xf7 && n2 >= 0x10 && n2 <= 0x1c) { // Plus42 unit literal
+        let j = i + 2, num = '';
+        while (j < bytes.length && bytes[j] >= 0x10 && bytes[j] <= 0x1c) { const x = bytes[j++]; num += x === 0x1a ? '.' : x === 0x1b ? 'ᴇ' : x === 0x1c ? '-' : String(x - 0x10); }
+        if (bytes[j] === 0x00) j++;
+        const u = readXstr(bytes, j);
+        if (u) { SAW42 = true; emit(`${num}_${bytesToStr(u.s)}`, u.end - i); continue; }
+      }
       if (b >= 0xa0 && b <= 0xa7) { const c = XROM[(b << 8) | n1]; emit(c ? c.name : `XROM ${p2(((b & 7) << 2) | (n1 >> 6), 2)},${p2(n1 & 63, 2)}`, 2); continue; }
       if (b >= 0xb1 && b <= 0xbf) { emit('GTO ' + p2(b - 0xb1, 2), 2); continue; }
       if (b >= 0xc0 && b <= 0xcd) {
@@ -482,11 +529,14 @@ UVAL 00 a6 f3 N|XAXIS 57 f2 62 NM|XMAX 00 a7 1f N|XMIN 00 a7 1e N|YAXIS 70 f2 63
         if ([0xc2, 0xc3, 0xca, 0xcb].includes(op) && L >= 3) { emit(`KEY ${keyNo(body[1])} ${op & 1 ? 'GTO' : 'XEQ'} ${op & 8 ? 'IND ' : ''}"${bytesToStr(body.slice(2))}"`, 1 + L); continue; }
         if (op === 0xa7) {
           const c2 = body[1];
+          if (L === 6 && (c2 === 0x76 || c2 === 0x7e)) { // Plus42 equation literal + its text
+            const t = readXstr(bytes, i + 7);
+            if (t) { SAW42 = true; const q = body[5] === 0xfe ? '`' : "'"; emit(`${c2 === 0x7e ? 'EVAL ' : ''}${q}${bytesToStr(t.s)}${q}`, t.end - i); continue; }
+          }
           if (L === 4 && (c2 === 0x32 || c2 === 0x33)) { emit(`${c2 === 0x32 ? 'GTOL' : 'XEQL'} ${p2((body[2] << 8) | body[3], 4)}`, 5); continue; }
           if (c2 === 0x41 || c2 === 0x49) { // XSTR chunks
-            let j = i, s = [];
-            while (true) { const LL = bytes[j] & 15, more = bytes[j + 2] === 0x49; s.push(...bytes.slice(j + 3, j + 1 + LL)); j += 1 + LL; if (!more || bytes[j + 1] !== 0xa7) break; }
-            emit(`XSTR "${bytesToStr(s)}"`, j - i); continue;
+            const x = readXstr(bytes, i);
+            if (x) { emit(`XSTR "${bytesToStr(x.s)}"`, x.end - i); continue; }
           }
           if (L === 3 && F2[c2]) { const a = sfx(body[2], false); if (!a) { raw(4); continue; } emit(`${F2[c2].name} ${fmtArg(a, argW(F2[c2]))}`, 4); continue; }
           if (SC[c2] && L >= 3) { const { c, ind } = SC[c2]; emit(`${c.name} ${ind ? 'IND ' : ''}"${bytesToStr(body.slice(2))}"`, 1 + L); continue; }
@@ -498,6 +548,7 @@ UVAL 00 a6 f3 N|XAXIS 57 f2 62 NM|XMAX 00 a7 1f N|XMIN 00 a7 1e N|YAXIS 70 f2 63
       }
       raw(1);
     }
+    progs.plus42 = SAW42;
     return progs;
   }
   function listing(progs) {
@@ -522,16 +573,12 @@ UVAL 00 a6 f3 N|XAXIS 57 f2 62 NM|XMAX 00 a7 1f N|XMIN 00 a7 1e N|YAXIS 70 f2 63
     while (res.length && res[res.length - 1] === '') res.pop();
     return res.join('\n');
   }
-  function viewListing(text, hideC, hideN) {
+  function viewListing(text, hideC, hideN, o = {}) {
     if (!hideC && !hideN) return text;
+    P42 = !!o.plus42;
     const out = [];
     for (const raw of text.replace(/\r/g, '').split('\n')) {
-      let cut = raw.length, inStr = false;
-      for (let i = 0; i < raw.length; i++) {
-        const ch = raw[i];
-        if (ch === '"') { if (!inStr) inStr = true; else if (closesStr(raw, i)) inStr = false; }
-        if ((ch === "'" || ch === ';' || ch === '@') && !inStr) { cut = i; break; }
-      }
+      const cut = commentAt(raw);
       let code = raw.slice(0, cut).trim(); const comment = cut < raw.length ? raw.slice(cut).trimEnd() : '';
       if (!code) { if (comment && !hideC) out.push(comment); else if (!comment) out.push(''); continue; }
       if (hideN) code = code.replace(NUMPFX, '');
@@ -550,6 +597,7 @@ UVAL 00 a6 f3 N|XAXIS 57 f2 62 NM|XMAX 00 a7 1f N|XMIN 00 a7 1e N|YAXIS 70 f2 63
     }
     return tidy(out);
   }
+  const encodeLine = (s, o = {}) => { P42 = !!o.plus42; return encLine(s); };
   return { encode, decode, format, listing, hexListing, parseHex, hexs, encodeLine, viewListing, viewHex };
 })();
 
@@ -563,10 +611,11 @@ let lastBytes = null, lastName = 'PROGRAM';
 // Full text of both panes. The textareas may show a filtered view (comments / line numbers hidden).
 const full = { src: '', hex: '' };
 const hides = ['srcHideC', 'srcHideN', 'hexHideC', 'hexHideN'];
+const mode = () => ({ plus42: $('p42').checked });
 const hidden = side => $(side + 'HideC').checked || $(side + 'HideN').checked;
 function render(keepCaret) {
   const pos = src.selectionStart;
-  src.value = DM42.viewListing(full.src, $('srcHideC').checked, $('srcHideN').checked);
+  src.value = DM42.viewListing(full.src, $('srcHideC').checked, $('srcHideN').checked, mode());
   hex.value = DM42.viewHex(full.hex, $('hexHideC').checked, $('hexHideN').checked);
   src.readOnly = hidden('src'); hex.readOnly = hidden('hex');
   if (keepCaret) src.selectionStart = src.selectionEnd = Math.min(pos, src.value.length);
@@ -593,10 +642,10 @@ function summary(progs) {
 }
 
 function doEncode() {
-  const e = DM42.encode(full.src);
+  const e = DM42.encode(full.src, mode());
   if (!e.progs.length && !e.errors.length) { say('<span class="err">Nothing to encode.</span>'); return; }
   lastBytes = e.bytes;
-  const dec = DM42.decode(e.bytes);
+  const dec = DM42.decode(e.bytes, mode());
   full.hex = DM42.hexListing(dec);
   lastName = nameFrom(dec);
   if ($('renum').checked) setSrc(DM42.format(e));
@@ -610,14 +659,19 @@ function doEncode() {
 function showDecoded(bytes, from) {
   if (!bytes.length) { say('<span class="err">No bytes found.</span>'); return; }
   lastBytes = bytes;
-  const progs = DM42.decode(bytes);
+  let progs = DM42.decode(bytes, mode()), switched = false;
+  if (progs.plus42 && !$('p42').checked) { // Plus42 literals or the Plus42 ↑ found: switch mode and decode again
+    $('p42').checked = true; switched = true; try { localStorage.setItem('dm42p42', '1'); } catch {}
+    progs = DM42.decode(bytes, mode());
+  }
   setSrc(DM42.listing(progs));
   full.hex = DM42.hexListing(progs);
   render();
   lastName = nameFrom(progs);
   const unk = progs.reduce((n, p) => n + p.lines.filter(l => l.text.startsWith('HEX ')).length, 0);
   say(`<span class="ok">Decoded ${progs.length} program${progs.length > 1 ? 's' : ''} from ${esc(from)} (${bytes.length} bytes).</span> ${summary(progs)}` +
-    (unk ? ` <span class="err">${unk} unrecognised instruction${unk > 1 ? 's' : ''} kept as HEX lines.</span>` : ''));
+    (unk ? ` <span class="err">${unk} unrecognised instruction${unk > 1 ? 's' : ''} kept as HEX lines.</span>` : '') +
+    (switched ? ' <span class="ro">Plus42 content found: Plus42 mode turned on.</span>' : ''));
   counts();
 }
 function doDecode() { showDecoded(DM42.parseHex(full.hex), 'hex'); }
@@ -704,6 +758,14 @@ src.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key ===
 hex.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); doDecode(); } });
 src.addEventListener('input', () => { if (!src.readOnly) setSrc(src.value); counts(); });
 hex.addEventListener('input', () => { if (!hex.readOnly) full.hex = hex.value; });
+try { $('p42').checked = localStorage.getItem('dm42p42') === '1'; } catch {}
+$('p42').addEventListener('change', () => {
+  try { localStorage.setItem('dm42p42', $('p42').checked ? '1' : '0'); } catch {}
+  render();
+  say($('p42').checked
+    ? `<span class="ok">Plus42 mode on.</span> ↑ in strings is byte 1E, 'A*B' / \`A*B\` are equations, 12_km is a unit value; comments use ; or @. Press Encode.`
+    : `<span class="ok">DM42 mode.</span> ↑ and ^ are byte 5E; ' ; @ start comments. Press Encode.`);
+});
 for (const id of hides) {
   try { $(id).checked = localStorage.getItem('dm42' + id) === '1'; } catch {}
   $(id).addEventListener('change', () => { try { localStorage.setItem('dm42' + id, $(id).checked ? '1' : '0'); } catch {} render(); });

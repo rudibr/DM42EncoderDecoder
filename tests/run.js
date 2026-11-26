@@ -82,5 +82,25 @@ for (const [src, hx] of lib) {
 const odd = D.encode(`"   [YYY"'-3YY'"\nLBL "S";entry\n"ABC" ' say "hi"\nSTO 01 @ at-sign comment`);
 check(!odd.errors.length && odd.progs[0].lines.map(l => l.text).join('|') === `"   [YYY"'-3YY'"|LBL "S"|"ABC"|STO 01|END`, 'quotes and comment markers inside/after strings, @ comments');
 
+// 8. Plus42 mode (byte layouts from Free42's stress.raw; whole file is byte-identical in this mode).
+const P = { plus42: true };
+const p42 = [
+  ["'A*B+C*D'", 'F6 A7 76 FF FF FF FF F9 A7 41 41 2A 42 2B 43 2A 44'],
+  ['`A*B+C*D`', 'F6 A7 76 FF FF FF FE F9 A7 41 41 2A 42 2B 43 2A 44'],
+  ["EVAL 'A*B+C*D'", 'F6 A7 7E FF FF FF FF F9 A7 41 41 2A 42 2B 43 2A 44'],
+  ['40076_km', 'A6 F7 14 10 10 17 16 00 F4 A7 41 6B 6D'],
+  ['"SELECT ↑"', 'F8 53 45 4C 45 43 54 20 1E'],
+];
+for (const [src, hx] of p42) {
+  let got; try { got = D.hexs(D.encodeLine(src, P).bytes); } catch (err) { got = 'ERR ' + err; }
+  const dec = D.decode(Uint8Array.from(hx.split(' ').map(x => parseInt(x, 16))), P);
+  check(got === hx && dec.plus42 && dec[0].lines[0].text === src, `Plus42: ${src} → ${got}`);
+}
+check(D.hexs(D.encodeLine('"↑"').bytes) === 'F1 5E' && D.hexs(D.encodeLine('"↑"', P).bytes) === 'F1 1E', '↑ is 5E in DM42 mode, 1E in Plus42 mode');
+const pm = D.encode(`'A*B' ; equation, then a comment\nSTO 01 @ note\n' a DM42 comment`, P);
+check(pm.errors.length === 1 && pm.errors[0].line === 3 && pm.progs[0].lines.map(l => l.text).join('|') === "'A*B'|STO 01|END", "Plus42 mode: ' starts an equation, ; and @ are comments, a ' comment line is an error");
+check(D.encode("'A*B'").progs.length === 0 && /Plus42 mode/.test(D.encode('`A*B`').errors[0].msg) && /Plus42 mode/.test(D.encode('12_km').errors[0].msg), 'DM42 mode: \' is a comment, ` and unit literals ask for Plus42 mode');
+check(!D.decode(D.encode('LBL "A"\n"x↑"').bytes).plus42, 'plain DM42 programs are not flagged as Plus42');
+
 console.log(fails ? `\n${fails} FAILED` : '\nAll tests passed');
 process.exit(fails ? 1 : 0);
