@@ -38,9 +38,11 @@ Tick **Plus42 mode** for Plus42 listings. It changes three things:
 
 - `↑` in strings is byte `1E` (in DM42/Free42 listings `↑` and `^` are both byte `5E`).
 - `'A*B+C*D'`, `` `A*B+C*D` ``, `EVAL 'A*B+C*D'` are equation literals, and `40076_km` is a unit value.
-- Comments start with `;` or `@` only, because `'` now starts an equation.
+- Comments work as in DM42 mode (`'`, `;`, `@`). A `'` is only an equation when it is the whole instruction:
+  at the start of the line, not followed by a space, and closed on the same line (`'A*B'`, `EVAL 'A*B'`).
 
-Decoding a `.raw` with Plus42 equations, units or the Plus42 `↑` turns the mode on automatically.
+Plus42 mode is off by default and not remembered between visits. Decoding a `.raw` with Plus42 equations,
+units or the Plus42 `↑` turns it on for that session.
 With it, Free42's `stress` test program (every instruction, 2645 bytes) and the Plus42 programs HPFX, HPOLY and MES encode byte-identical.
 Byte codes follow Free42's `core_tables.cc` and `export_hp42s`. Numbers are terminated with `00` and END is written as `C0 00 0D`, the same as Free42.
 
