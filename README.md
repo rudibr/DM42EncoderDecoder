@@ -12,6 +12,7 @@ The demo types a short program and encodes it, opens `DPLOT.raw`, pastes hex and
 - **Encode →** turns the listing into raw bytes and renumbers it. **← Decode** turns hex back into a listing.
 - **Open file / drag and drop:** `.raw` files are decoded; text listings (`.txt`) are encoded.
 - **Save .raw / Save .txt:** download the program for the calculator or as text.
+- **Hide comments / Hide line numbers** (on each pane): display-only filters. Encoding always uses the full text, and a pane is read-only while something is hidden. Copy and Save .txt take what is shown, so they also export a clean listing.
 
 ## Listing syntax
 
